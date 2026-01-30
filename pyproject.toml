@@ -1,0 +1,30 @@
+[project]
+name = "mnemo"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "datasets",
+    "numpy",
+    "pandas",
+    "torch",
+    "python-dotenv",
+    "tqdm",
+]
+
+
+[dependency-groups]
+dev = [
+    "ipykernel",
+    "ipywidgets",
+    "ruff"
+]
+
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
