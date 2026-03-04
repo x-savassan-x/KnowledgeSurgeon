@@ -4,19 +4,24 @@ version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
     "datasets",
-    # "numpy",
-    # "pandas",
-    # "torch",
-    "python-dotenv",
+    "numpy",
+    "scipy",
+    "nltk",
+    "scikit-learn",
+    "torch",
+    "transformers",
+    "openai",
+    "regex",
+    "pyyaml",
     "tqdm",
+    "python-dotenv",
 ]
 
 
 [dependency-groups]
 dev = [
     "ipykernel",
-    "ipywidgets",
-    # "ruff"
+    "ipywidgets"
 ]
 
 

@@ -1,0 +1,13 @@
+datasets
+numpy
+scipy
+nltk
+scikit-learn
+--index-url https://download.pytorch.org/whl/cu118
+torch
+transformers
+openai
+regex
+pyyaml
+tqdm
+python-dotenv
