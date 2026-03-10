@@ -1,0 +1,1 @@
+from .wise import WISE

@@ -68,7 +68,8 @@ class Trace(contextlib.AbstractContextManager):
         if layer is not None:
             module = get_module(module, layer)
 
-        def retain_hook(m, inputs, output, kwargs=None):
+        def retain_hook(m, inputs, kwargs, output):
+            """with_kwargs=True hook: PyTorch calls as (module, args, kwargs, output)."""
             if retain_input:
                 # Try to get input from positional args first
                 if len(inputs) > 0:
@@ -87,8 +88,6 @@ class Trace(contextlib.AbstractContextManager):
                         retain_grad=False,
                     )
                 else:
-                    # Fallback: use output as input proxy for transformer blocks
-                    # since they transform hidden_states -> hidden_states with same shape
                     retainer.input = None
             if edit_output:
                 output = invoke_with_optional_args(
@@ -98,9 +97,6 @@ class Trace(contextlib.AbstractContextManager):
                 retainer.output = recursive_copy(
                     output, clone=clone, detach=detach, retain_grad=retain_grad
                 )
-                # When retain_grad is set, also insert a trivial
-                # copy operation.  That allows in-place operations
-                # to follow without error.
                 if retain_grad:
                     output = recursive_copy(retainer.output, clone=True, detach=False)
             if stop:
@@ -112,9 +108,9 @@ class Trace(contextlib.AbstractContextManager):
             # PyTorch 2.0+ supports with_kwargs parameter
             self.registered_hook = module.register_forward_hook(retain_hook, with_kwargs=True)
         except TypeError:
-            # Fallback for older PyTorch versions - wrap the hook to ignore kwargs parameter
+            # Fallback for older PyTorch versions — no kwargs available
             def legacy_hook(m, inputs, output):
-                return retain_hook(m, inputs, output, kwargs=None)
+                return retain_hook(m, inputs, {}, output)
             self.registered_hook = module.register_forward_hook(legacy_hook)
         self.stop = stop
 

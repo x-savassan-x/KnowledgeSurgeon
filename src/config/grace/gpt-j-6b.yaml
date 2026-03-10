@@ -1,0 +1,15 @@
+alg_name: GRACE
+model_name: EleutherAI/gpt-j-6B
+gpu_id: 0
+fp16: True
+
+adapter_layer: transformer.h.25.mlp.fc_out
+
+val_init: cold
+edit_lr: 1.0
+n_iter: 200
+
+eps_init: 1.0
+dist_fn: euc
+eps_expand: coverage
+replacement: replace_last
