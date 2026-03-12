@@ -1,26 +1,73 @@
-from .wrapper import Wrapper
-from .utils import tokenize
+import torch
+
+from .codebook import Codebook
 from ..editor import Editor
 from ..edtior_utils import EditRequest
 from ...config import GraceConfig
 
 
 class GRACE(Editor):
+    config: GraceConfig
+
     def __init__(self, config: GraceConfig):
         super().__init__(config)
         self.tokenizer.padding_side = 'left'
 
+        for p in self.model.parameters():
+            p.requires_grad = False
+
+        orig_module = self.model.get_submodule(config.codebook_layer)
+        self.codebook = Codebook(orig_module, config).to(self.model.device)
+        self.model.set_submodule(config.codebook_layer, self.codebook, strict=True)
+
+        self._checkpoint = None
+
+    def reset(self):
+        self.codebook.keys = None
+        self.codebook.values = None
+        self.codebook.epsilons = None
+        self.codebook.key_labels = None
+        self._checkpoint = None
+
     def _apply(self, request: EditRequest):
-        device = self.model.device
-        tokens = tokenize(request, tokenizer=self.tokenizer, device=device)
+        prompt, ans = request.prompt, request.new_ans
+        tokens = self.tokenizer(f"{prompt} {ans}", return_tensors="pt")
+        tokens["labels"] = tokens["input_ids"].clone()
+        prompt_tokens_len = len(self.tokenizer.encode(prompt))
+        tokens["labels"][0, :prompt_tokens_len] = -100 # ignore_index of CrossEntropyLoss
+        tokens = {k: v.to(self.model.device) for k, v in tokens.items()}
 
-        if not isinstance(self.model, Wrapper):
-            self.model = Wrapper(self.model, self.config)
+        self.codebook.edit_label = tokens["labels"]
 
-        self.model.edit(config=self.config, tokens=tokens, edit_id=request.new_ans)
-        self._weights_copy = self.model.reset_layer
+        self.codebook.training = True
+        self.codebook.key_id = (tokens["labels"] == -100).sum() - 1
 
-    def _restore(self):
-        if self._weights_copy is not None:
-            self._weights_copy()
-            self._weights_copy = None
+        for i in range(self.config.n_iter):
+            self.codebook.iter = i
+            outputs = self.model(**tokens)
+            if i == 0:
+                optimizer = torch.optim.Adam(self.model.parameters(), self.config.edit_lr)
+            outputs.loss.backward()
+            optimizer.step() # type: ignore
+            optimizer.zero_grad() # type: ignore
+
+        self.codebook.training = False
+        self.codebook.iter = -1
+        self.codebook.key_id = -1
+
+    def _update_checkpoint(self):
+        self._checkpoint = {
+            "keys":       self.codebook.keys.detach().clone(), # type: ignore
+            "values":     self.codebook.values.detach().clone(), # type: ignore
+            "epsilons":   self.codebook.epsilons.detach().clone(), # type: ignore
+            "key_labels": list(self.codebook.key_labels), # type: ignore
+        }
+
+    def _revert(self):
+        if self._checkpoint is None:
+            self.reset()
+        else:
+            self.codebook.keys       = self._checkpoint["keys"]
+            self.codebook.values     = torch.nn.Parameter(self._checkpoint["values"].clone())
+            self.codebook.epsilons   = self._checkpoint["epsilons"]
+            self.codebook.key_labels = list(self._checkpoint["key_labels"])

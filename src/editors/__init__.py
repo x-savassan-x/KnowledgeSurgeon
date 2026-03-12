@@ -7,8 +7,8 @@ from .memit import MEMIT
 from .grace import GRACE
 from .wise import WISE
 from .alpha_edit import AlphaEdit
-
 from ..config import (
+    Config,
     FtConfig,
     RomeConfig,
     MemitConfig,
@@ -16,15 +16,16 @@ from ..config import (
     WiseConfig,
     AlphaEditConfig,
 )
+from .edtior_utils import EditRequest
 
 
-EDITOR_REGISTRY = {
+EDITOR_REGISTRY: dict[str, tuple[type[Editor], type[Config]]] = {
     "FT": (FT, FtConfig),
     "ROME": (ROME, RomeConfig),
     "MEMIT": (MEMIT, MemitConfig),
     "GRACE": (GRACE, GraceConfig),
     "WISE": (WISE, WiseConfig),
-    "AlphaEdit": (AlphaEdit, AlphaEditConfig),
+    "AlphaEdit": (AlphaEdit, AlphaEditConfig)
 }
 
 

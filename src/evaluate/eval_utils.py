@@ -1,11 +1,12 @@
+import json
 import re
 
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Callable
-from statistics import mean
 from dotenv import dotenv_values
 from openai import OpenAI
+from statistics import mean
+from typing import Callable
+from pathlib import Path
 
 
 @dataclass
@@ -67,7 +68,7 @@ def judge_response(prompt: str, expected_ans: str, predicted_ans: str) -> EvalRe
 
     base_url = llm_config["LLM_BASE_URL"]
     assert base_url, "No LLM_BASE_URL set. Fill in LLM_BASE_URL in .env."
-    
+
     model = llm_config["LLM_MODEL"]
     assert model, "No LLM_MODEL set. Fill in LLM_MODEL in .env."
 
@@ -114,3 +115,15 @@ def clean_response(response: str) -> str:
         response = m.group()
 
     return response.rstrip()
+
+
+RESULTS_DIR = Path(__file__).parent.parent.parent / "data" / "results"
+def save_results(results: list[dict],
+                 method: str, dataset: str, model: str,
+                 steps: int, non_seq_per_step: int) -> Path:
+    dest = RESULTS_DIR / method
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / f"{dataset}_{model}_{steps}_{non_seq_per_step}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    return path

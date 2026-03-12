@@ -1,7 +1,7 @@
 alg_name: ROME
 model_name: openai-community/gpt2-xl
 gpu_id: 0
-fp16: false
+fp16: True
 
 layers: [17]
 fact_token: subject_last
@@ -11,7 +11,7 @@ v_loss_layer: 47
 v_weight_decay: 0.5
 clamp_norm_factor: 4
 kl_factor: 0.0625
-mom2_adjustment: false
+mom2_adjustment: False
 context_template_length_params: [[5, 10], [10, 10]]
 
 rewrite_module_tmp: "transformer.h.{}.mlp.c_proj"

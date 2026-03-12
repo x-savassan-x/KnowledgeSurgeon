@@ -1,45 +1,29 @@
-from dataclasses import dataclass
-from typing import List
-
+from dataclasses import dataclass, field
 from ..config import Config
 
 
 @dataclass
 class RomeConfig(Config):
-    # Which layers to apply ROME to (typically a single layer)
-    layers: List[int]
-
-    # Strategy for locating the fact token:
-    #   'subject_last'  – last token of the subject span
-    #   'last'          – last token of the full prompt
-    fact_token: str
-
-    # Right-vector (v) optimization
-    v_num_grad_steps: int
-    v_lr: float
-    v_loss_layer: int
-    v_weight_decay: float
-    clamp_norm_factor: float
-    kl_factor: float
-
-    # Whether to apply C^{-1} correction to the left vector
-    mom2_adjustment: bool
-
-    # [(length, n_gen), ...] controls context template generation
-    context_template_length_params: List[List[int]]
-
-    # Module templates (dot-notation with {} for layer index)
-    rewrite_module_tmp: str
-    layer_module_tmp: str
-    mlp_module_tmp: str
-    attn_module_tmp: str
-    ln_f_module: str
-    lm_head_module: str
-
-    # Second-moment covariance statistics
-    mom2_dataset: str
-    mom2_n_samples: int
-    mom2_dtype: str
-    stats_dir: str
-
+    layers: list[int] = field(default_factory=list)
+    fact_token: str = "subject_last"
+    v_num_grad_steps: int = 20
+    v_lr: float = 5e-1
+    v_loss_layer: int = 47
+    v_weight_decay: float = 0.5
+    clamp_norm_factor: float = 4
+    kl_factor: float = 0.0625
+    mom2_adjustment: bool = False
+    context_template_length_params: list[list[int]] = field(default_factory=lambda: [[5, 10], [10, 10]])
     max_length: int = 40
+
+    rewrite_module_tmp: str = ""
+    layer_module_tmp: str = ""
+    mlp_module_tmp: str = ""
+    attn_module_tmp: str = ""
+    ln_f_module: str = ""
+    lm_head_module: str = ""
+
+    mom2_dataset: str = "wikipedia"
+    mom2_n_samples: int = 100000
+    mom2_dtype: str = "float32"
+    stats_dir: str = "./data/stats"

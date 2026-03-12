@@ -41,9 +41,8 @@ def get_responses(model, tokenizer, prompts: list[str]) -> list[str]:
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
-            max_new_tokens=50,
+            max_new_tokens=20,
             do_sample=False,
-            temperature=0.0,
             repetition_penalty=1.25,
             pad_token_id=tokenizer.pad_token_id,
         )

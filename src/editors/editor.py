@@ -12,24 +12,30 @@ class Editor(ABC):
     def __init__(self, config: Config):
         self.config = config
         self.model, self.tokenizer = load_model_and_tokenizer(**asdict(config))
-        self._weights_copy = None
-
+        self._is_last_edit_sequential = False
 
     def __del__(self):
-        if hasattr(self, 'model'):
-            self.model.cpu()
-            del self.model
-        self._weights_copy = None
+        self.model.cpu()
+        del self.model
         gc.collect()
         torch.cuda.empty_cache()
 
     def edit(self, request: EditRequest, is_sequential=False):
-        if not is_sequential:
-            self._restore()
+        if not self._is_last_edit_sequential:
+            self._revert()
         self._apply(request)
+        if is_sequential:
+            self._update_checkpoint()
+        self._is_last_edit_sequential = is_sequential
+
+    @abstractmethod
+    def reset(self): ...
 
     @abstractmethod
     def _apply(self, request: EditRequest): ...
 
     @abstractmethod
-    def _restore(self): ...
+    def _update_checkpoint(self): ...
+
+    @abstractmethod
+    def _revert(self): ...

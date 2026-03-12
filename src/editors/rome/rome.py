@@ -1,32 +1,45 @@
 import torch
 
-from ..editor import Editor
-from ...config import Config
-from ...utils import EditRequest
-from ...utils.nethook import get_parameter
+from .. import _easyedit_compat  # noqa: F401 — registers namespace packages
+from easyeditor.models.rome.rome_main import apply_rome_to_model
 
-from .rome_core import apply_rome_to_model
+from ..editor import Editor
+from ..edtior_utils import EditRequest
+from ...config import RomeConfig
 
 
 class ROME(Editor):
-    def __init__(self, config: Config):
+    def __init__(self, config: RomeConfig):
         super().__init__(config)
-        self.tokenizer.padding_side = 'right'
+        self.tokenizer.padding_side = "right"
+        self.config.device = self.config.gpu_id  # bridge for EasyEdit
+        self._initial_weights: dict[str, torch.Tensor] = {}
 
-    def _apply(self, edit_request: EditRequest):
-        request = {
-            "prompt": edit_request.prompt,
-            "subject": edit_request.subject,
-            "target_new": edit_request.new_ans,
-        }
-        self._weights_copy = apply_rome_to_model(
-            self.model, self.tokenizer, request, self.config
+    def reset(self):
+        if not self._initial_weights:
+            return
+        params = dict(self.model.named_parameters())
+        with torch.no_grad():
+            for name, weight in self._initial_weights.items():
+                params[name][...] = weight.clone()
+
+    def _apply(self, request: EditRequest):
+        ee_request = [{
+            "prompt": request.prompt.replace(request.subject, "{}"),
+            "subject": request.subject,
+            "target_new": request.new_ans,
+            "target_true": request.old_ans,
+        }]
+        _, weights_copy = apply_rome_to_model(
+            self.model, self.tokenizer, ee_request, self.config,
+            return_orig_weights=True,
         )
+        if not self._initial_weights:
+            self._initial_weights = {k: v.detach().clone() for k, v in weights_copy.items()}
 
-    def _restore(self):
-        if self._weights_copy is not None:
-            with torch.no_grad():
-                for w_name, original_w in self._weights_copy.items():
-                    w = get_parameter(self.model, w_name)
-                    w[...] = original_w
-            self._weights_copy = None
+    def _update_checkpoint(self):
+        pass
+
+    def _revert(self):
+        pass
+
