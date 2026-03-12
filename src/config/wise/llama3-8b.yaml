@@ -23,9 +23,3 @@ weights: 1.0
 
 retrieve: True
 replay: False
-
-use_chat_template: True
-
-# for save and load
-# save_path: "./wise_checkpoint/wise.pt"
-# load_path: "./wise_checkpoint/wise.pt"
