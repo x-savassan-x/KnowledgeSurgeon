@@ -100,7 +100,8 @@ def judge_response(prompt: str, expected_ans: str, predicted_ans: str) -> EvalRe
     )
 
     content = completion.choices[0].message.content
-    assert content, "LLM judge did not return any content."
+    if content is None:
+        content = "False"
 
     content = content.strip()
     if content not in {"True", "False"}:
@@ -144,7 +145,8 @@ def judge_responses_batch(
         )
 
         content = completion.choices[0].message.content
-        assert content, "LLM judge did not return any content."
+        if content is None:
+            content = "False\n" * len(chunk)
 
         lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
         # Pad or truncate to match chunk size
