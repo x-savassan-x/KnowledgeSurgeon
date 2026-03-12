@@ -7,10 +7,10 @@ layers: [0]
 num_steps: 25
 batch_size: 3
 max_length: 40
-lr: 5e-4
+lr: 5.0e-4
 weight_decay: 0
 kl_factor: 0
-norm_constraint: 5e-4
+norm_constraint: 5.0e-4
 objective_optimization: prompt_last
 
 rewrite_module_tmp: "transformer.h.{}.mlp.c_proj"

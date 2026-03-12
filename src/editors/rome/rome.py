@@ -1,7 +1,6 @@
 import torch
 
-from .. import _easyedit_compat  # noqa: F401 — registers namespace packages
-from easyeditor.models.rome.rome_main import apply_rome_to_model
+from .rome_main import apply_rome_to_model
 
 from ..editor import Editor
 from ..edtior_utils import EditRequest

@@ -1,8 +1,7 @@
 import torch
 
-from .. import _easyedit_compat  # noqa: F401 — registers namespace packages
-import easyeditor.models.alphaedit.AlphaEdit_main as _ae_mod
-from easyeditor.models.alphaedit.AlphaEdit_main import apply_AlphaEdit_to_model
+from . import AlphaEdit_main as _ae_mod
+from .AlphaEdit_main import apply_AlphaEdit_to_model
 
 from ..editor import Editor
 from ..edtior_utils import EditRequest

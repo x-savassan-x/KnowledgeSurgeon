@@ -1,7 +1,6 @@
 import torch
 
-from .. import _easyedit_compat  # noqa: F401 — registers namespace packages
-from easyeditor.models.memit.memit_main import apply_memit_to_model
+from .memit_main import apply_memit_to_model
 
 from ..editor import Editor
 from ..edtior_utils import EditRequest

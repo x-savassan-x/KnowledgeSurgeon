@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import yaml
 
 from .editor import Editor
@@ -32,6 +34,12 @@ EDITOR_REGISTRY: dict[str, tuple[type[Editor], type[Config]]] = {
 def load_editor(config_path: str) -> Editor:
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
+
+    # Resolve stats_dir relative to the config file so it works from any cwd
+    if "stats_dir" in config:
+        config["stats_dir"] = str(
+            (Path(config_path).resolve().parent / config["stats_dir"]).resolve()
+        )
 
     alg_name = config["alg_name"]
     if alg_name not in EDITOR_REGISTRY:
