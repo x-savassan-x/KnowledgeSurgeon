@@ -30,7 +30,8 @@ def evaluate(model, tokenizer, eval_suite: EvalSuite) -> EvalResult:
     return result
 
 
-def evaluate_batch(model, tokenizer, eval_suites: list[EvalSuite],
+def evaluate_batch(model, tokenizer,
+                   eval_suites: list[EvalSuite],
                    inference_batch_size: int = 32,
                    judge_batch_size: int = 20) -> list[EvalResult]:
     """Evaluate multiple EvalSuites with batched model inference and batched LLM judging."""

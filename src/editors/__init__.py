@@ -1,49 +1,30 @@
-from pathlib import Path
-
-import yaml
-
 from .editor import Editor
+from .edtior_utils import EditRequest
+
 from .ft import FT
 from .rome import ROME
-from .memit import MEMIT
 from .grace import GRACE
 from .wise import WISE
 from .alpha_edit import AlphaEdit
-from ..config import (
-    Config,
-    FtConfig,
-    RomeConfig,
-    MemitConfig,
-    GraceConfig,
-    WiseConfig,
-    AlphaEditConfig,
-)
-from .edtior_utils import EditRequest
+
+from ..config import load_config
 
 
-EDITOR_REGISTRY: dict[str, tuple[type[Editor], type[Config]]] = {
-    "FT": (FT, FtConfig),
-    "ROME": (ROME, RomeConfig),
-    "MEMIT": (MEMIT, MemitConfig),
-    "GRACE": (GRACE, GraceConfig),
-    "WISE": (WISE, WiseConfig),
-    "AlphaEdit": (AlphaEdit, AlphaEditConfig)
+EDITOR_REGISTRY: dict[str, type[Editor]] = {
+    "FT": FT,
+    "ROME": ROME,
+    "GRACE": GRACE,
+    "WISE": WISE,
+    "AlphaEdit": AlphaEdit
 }
 
 
 def load_editor(config_path: str) -> Editor:
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_path)
 
-    # Resolve stats_dir relative to the config file so it works from any cwd
-    if "stats_dir" in config:
-        config["stats_dir"] = str(
-            (Path(config_path).resolve().parent / config["stats_dir"]).resolve()
-        )
-
-    alg_name = config["alg_name"]
+    alg_name = config.alg_name
     if alg_name not in EDITOR_REGISTRY:
-        raise ValueError(f"Unknown editing method: {alg_name}.")
+        raise ValueError(f"Unregistered editor: {alg_name}.")
 
-    editor_cls, config_cls = EDITOR_REGISTRY[alg_name]
-    return editor_cls(config_cls(**config))
+    editor_cls = EDITOR_REGISTRY[alg_name]
+    return editor_cls(config)

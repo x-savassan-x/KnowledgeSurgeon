@@ -8,6 +8,9 @@ class Codebook(torch.nn.Module):
 
         self.orig_module = orig_module
         self.config = config
+        self.device = orig_module.weight.device
+
+        self.value_shape, self.key_shape = orig_module.weight.shape
 
         self.keys: torch.Tensor | None = None
         self.values: torch.nn.Parameter | None = None
@@ -18,12 +21,6 @@ class Codebook(torch.nn.Module):
         self.training = False
         self.key_id = -1
         self.iter = -1
-
-        self.key_shape = orig_module.weight.shape[1]
-        self.value_shape = orig_module.weight.shape[0]
-        orig_module.weight.T
-
-        self.device = orig_module.weight.device
 
     def forward(self, input):
         output = self.orig_module(input)
@@ -44,12 +41,6 @@ class Codebook(torch.nn.Module):
             self.init_key_value(query, new_value)
 
         elif self.iter == 0:
-            assert self.keys is not None\
-                and self.values is not None\
-                and self.epsilons is not None\
-                and self.edit_label is not None\
-                and self.key_labels is not None
-
             dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
             smallest_distance, nearest_key = dists.min(0)
 
@@ -96,10 +87,10 @@ class Codebook(torch.nn.Module):
         self.epsilons = torch.tensor(self.config.eps_init, device=self.device).view(1)
         self.key_labels = [self.edit_label]
 
-    def add_key(self, new_key: torch.Tensor, new_value: torch.nn.Parameter):
-        self.keys = torch.vstack([self.keys, new_key.detach()])
+    def add_key(self, key: torch.Tensor, value: torch.nn.Parameter):
+        self.keys = torch.vstack([self.keys, key.detach()])
 
-        self.values = torch.nn.Parameter(torch.vstack([self.values, new_value]))
+        self.values = torch.nn.Parameter(torch.vstack([self.values, value]))
 
         new_epsilon = torch.tensor(self.config.eps_init, device=self.device).view(1)
         self.epsilons = torch.vstack([self.epsilons, new_epsilon])

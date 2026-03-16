@@ -1,8 +1,8 @@
 import json
 import re
+import os
 
 from dataclasses import dataclass, field, asdict
-from dotenv import dotenv_values
 from openai import OpenAI
 from statistics import mean
 from typing import Callable
@@ -63,20 +63,11 @@ def evaluate_pairs(pairs: list[EvalPair],
 
 
 ENV_PATH = Path(__file__).parent.parent.parent / ".env"
-
 def _get_llm_client():
-    llm_config = dotenv_values(ENV_PATH)
+    model = os.environ["JUDGE_MODEL"]
+    assert model, "No JUDGE_MODEL set. Fill in JUDGE_MODEL in .env."
 
-    base_url = llm_config["LLM_BASE_URL"]
-    assert base_url, "No LLM_BASE_URL set. Fill in LLM_BASE_URL in .env."
-
-    model = llm_config["LLM_MODEL"]
-    assert model, "No LLM_MODEL set. Fill in LLM_MODEL in .env."
-
-    api_key = llm_config["LLM_API_KEY"]
-    assert api_key, "No LLM_API_KEY set. Fill in LLM_API_KEY in .env."
-
-    return OpenAI(api_key=api_key, base_url=base_url), model
+    return OpenAI(), model
 
 
 def judge_response(prompt: str, expected_ans: str, predicted_ans: str) -> EvalRecord:
@@ -110,10 +101,8 @@ def judge_response(prompt: str, expected_ans: str, predicted_ans: str) -> EvalRe
     return EvalRecord(prompt, expected_ans, predicted_ans, eval(content))
 
 
-def judge_responses_batch(
-    triples: list[tuple[str, str, str]],
-    batch_size: int = 20,
-) -> list[EvalRecord]:
+def judge_responses_batch(triples: list[tuple[str, str, str]],
+                          batch_size: int = 20) -> list[EvalRecord]:
     client, model = _get_llm_client()
     records: list[EvalRecord] = []
 
