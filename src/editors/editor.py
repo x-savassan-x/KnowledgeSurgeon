@@ -1,6 +1,3 @@
-import gc
-import torch
-
 from abc import ABC, abstractmethod
 from dataclasses import asdict
 
@@ -13,12 +10,6 @@ class Editor(ABC):
         self.config = config
         self.model, self.tokenizer = load_model_and_tokenizer(**asdict(config))
         self._is_last_edit_sequential = False
-
-    def __del__(self):
-        self.model.cpu()
-        del self.model
-        gc.collect()
-        torch.cuda.empty_cache()
 
     def edit(self, request: EditRequest, is_sequential=False):
         if not self._is_last_edit_sequential:

@@ -24,7 +24,7 @@ def load_model_and_tokenizer(model_name: str, fp16: bool, gpu_id: int, **_):
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         dtype=torch.bfloat16 if fp16 else torch.float32,
-    ).cuda(gpu_id) # type: ignore
+    ).cuda(gpu_id)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token_id = tokenizer.eos_token_id
 

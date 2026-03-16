@@ -48,8 +48,8 @@ class GRACE(Editor):
             if i == 0:
                 optimizer = torch.optim.Adam(self.model.parameters(), self.config.edit_lr)
             outputs.loss.backward()
-            optimizer.step() # type: ignore
-            optimizer.zero_grad() # type: ignore
+            optimizer.step()
+            optimizer.zero_grad()
 
         self.codebook.training = False
         self.codebook.iter = -1
@@ -57,10 +57,10 @@ class GRACE(Editor):
 
     def _update_checkpoint(self):
         self._checkpoint = {
-            "keys":       self.codebook.keys.detach().clone(), # type: ignore
-            "values":     self.codebook.values.detach().clone(), # type: ignore
-            "epsilons":   self.codebook.epsilons.detach().clone(), # type: ignore
-            "key_labels": list(self.codebook.key_labels), # type: ignore
+            "keys":       self.codebook.keys.detach().clone(),
+            "values":     self.codebook.values.detach().clone(),
+            "epsilons":   self.codebook.epsilons.detach().clone(),
+            "key_labels": list(self.codebook.key_labels),
         }
 
     def _revert(self):

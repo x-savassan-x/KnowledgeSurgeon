@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 from ..config import Config
 
 
@@ -20,7 +21,7 @@ class GraceConfig(Config):
     # 'cold': random initialization
     # 'warm': initialized from the layer's actual output for the edit token
     #         (closer starting point, typically converges faster)
-    val_init: str
+    val_init: Literal["cold", "warm"]
 
     # Initial match radius for each codebook entry
     # A query whose distance to a stored key is within eps is redirected
@@ -32,4 +33,4 @@ class GraceConfig(Config):
     #   'replace_last':   only the subject token position
     #   'replace_all':    every token position in the sequence
     #   'replace_prompt': all positions up to (but not including) the subject token
-    replacement: str
+    replace_strat: Literal["replace_last", "replace_all", "replace_prompt"]
