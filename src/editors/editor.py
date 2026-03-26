@@ -1,32 +1,23 @@
 from abc import ABC, abstractmethod
-from dataclasses import asdict
 
-from .edtior_utils import EditRequest, load_model_and_tokenizer
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from .edtior_utils import EditRequest
 from ..config import Config
 
 
 class Editor(ABC):
     def __init__(self, config: Config):
+        self.model = AutoModelForCausalLM.from_pretrained(
+            config.model_name,
+            dtype=torch.bfloat16 if config.fp16 else torch.float32,
+        ).cuda(config.gpu_id)
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         self.config = config
-        self.model, self.tokenizer = load_model_and_tokenizer(**asdict(config))
-        self._is_last_edit_sequential = False
-
-    def edit(self, request: EditRequest, is_sequential=False):
-        if not self._is_last_edit_sequential:
-            self._revert()
-        self._apply(request)
-        if is_sequential:
-            self._update_checkpoint()
-        self._is_last_edit_sequential = is_sequential
 
     @abstractmethod
-    def reset(self): ...
+    def edit(self, request: EditRequest):...
 
     @abstractmethod
-    def _apply(self, request: EditRequest): ...
-
-    @abstractmethod
-    def _update_checkpoint(self): ...
-
-    @abstractmethod
-    def _revert(self): ...
+    def reset(self):...

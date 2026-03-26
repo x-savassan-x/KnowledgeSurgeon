@@ -2,8 +2,10 @@ from .eval import evaluate
 from .eval_utils import (
     EvalPair,
     EvalRecord,
-    EvalResult,
-    EvalSuite,
     MetricResult,
+    EvalSuite,
+    EvalResult,
     get_model_prediction,
+    get_teacher_scores,
+    get_judge_scores
 )

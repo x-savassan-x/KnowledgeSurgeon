@@ -29,21 +29,37 @@ class MetricResult:
 
 @dataclass
 class EvalSuite:
-    reliability: list[EvalPair] | None = None
+    success: list[EvalPair] | None = None
     locality: list[EvalPair] | None = None
     portability: list[EvalPair] | None = None
 
 
 @dataclass
 class EvalResult:
-    reliability: MetricResult | None = None
+    success: MetricResult | None = None
     locality: MetricResult | None = None
     portability: MetricResult | None = None
 
 
-def get_model_prediction(model, tokenizer,
-                         prompts: list[str],
-                         prediction_max_len: int = 64) -> list[str]:
+def get_model_prediction(
+    model, tokenizer,
+    prompts: list[str],
+    **config
+) -> list[str]:
+
+    if not prompts:
+        return []
+
+    default_config = {
+        "pad_token_id": tokenizer.pad_token_id\
+                        if tokenizer.pad_token_id is not None\
+                        else tokenizer.eos_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "repetition_penalty": 1.5,
+        "max_new_tokens": 128,
+    }
+    config = {**default_config, **config}
+
     orig_padding_side = tokenizer.padding_side
     tokenizer.padding_side = "left"
     inputs = tokenizer(
@@ -54,23 +70,19 @@ def get_model_prediction(model, tokenizer,
     tokenizer.padding_side = orig_padding_side
 
     with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            do_sample=False,
-            max_new_tokens=prediction_max_len,
-            repetition_penalty=1.5,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id
-        )
+        output_ids = model.generate(**inputs, **config)
 
     prompt_length = inputs["input_ids"].shape[1]
     generated_ids = output_ids[:, prompt_length:]
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 
-def get_teacher_scores(model, tokenizer,
-                       records: list[EvalRecord],
-                       batch_size: int) -> None:
+def get_teacher_scores(
+    model, tokenizer,
+    records: list[EvalRecord],
+    batch_size: int
+) -> None:
+
     if not records:
         return
 
@@ -86,18 +98,18 @@ def get_teacher_scores(model, tokenizer,
                 prompts = [record.prompt for record in batch]
                 answers = [record.ground_truth for record in batch]
 
-                combined_texts = [f"{prompt} {answer}" for prompt, answer in zip(prompts, answers)]
-                prompt_lens = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
-                               for prompt in prompts]
-
+                full_prompts = [f"{prompt} {answer}"
+                                for prompt, answer in zip(prompts, answers)]
                 inputs = tokenizer(
-                    combined_texts,
+                    full_prompts,
                     return_tensors="pt",
                     padding=True,
                     add_special_tokens=False,
                 ).to(model.device)
 
                 labels = inputs["input_ids"].clone()
+                prompt_lens = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
+                               for prompt in prompts]
                 for idx, prompt_len in enumerate(prompt_lens):
                     labels[idx, :prompt_len] = -100
 
@@ -122,14 +134,19 @@ def get_teacher_scores(model, tokenizer,
         tokenizer.padding_side = orig_padding_side
 
 
-async def get_judge_scores(records: list[EvalRecord],
-                           batch_size: int,
-                           max_concurrency: int = 5,
-                           max_retries: int = 3,
-                           init_retry_delay: float = 1.0,
-                           max_retry_delay: float = 10.0) -> None:
+async def get_judge_scores(
+    records: list[EvalRecord],
+    batch_size: int,
+    **config
+) -> None:
+
     if not records:
         return
+
+    max_concurrency = config.get("max_concurrency", 5)
+    max_retries = config.get("max_retries", 3)
+    init_retry_delay = config.get("init_retry_delay", 1.0)
+    max_retry_delay = config.get("max_retry_delay", 10.0)
 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
@@ -234,15 +251,3 @@ async def get_judge_scores(records: list[EvalRecord],
 
     for record in pending_records:
         record.score = 1e-9
-
-
-# RESULTS_DIR = Path(__file__).parent.parent.parent / "data" / "results"
-# def save_results(results: list[dict],
-#                  method: str, dataset: str, model: str,
-#                  steps: int, non_seq_per_step: int) -> Path:
-#     dest = RESULTS_DIR / method
-#     dest.mkdir(parents=True, exist_ok=True)
-#     path = dest / f"{dataset}_{model}_{steps}_{non_seq_per_step}.json"
-#     with open(path, "w", encoding="utf-8") as f:
-#         json.dump(results, f, indent=2, ensure_ascii=False)
-#     return path
