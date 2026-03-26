@@ -1,177 +1,248 @@
-import json
-import re
+import asyncio
 import os
+from dataclasses import dataclass, field
+from itertools import batched
 
-from dataclasses import dataclass, field, asdict
-from openai import OpenAI
-from statistics import mean
-from typing import Callable
-from pathlib import Path
+import torch
+from openai import AsyncOpenAI
 
 
 @dataclass
 class EvalPair:
     prompt: str
-    expected_ans: str
+    ground_truth: str
 
 
 @dataclass
 class EvalRecord:
     prompt: str
-    expected_ans: str
-    predicted_ans: str
-    match: bool
+    ground_truth: str
+    prediction: str = ''
+    score: float = 0
 
 
 @dataclass
 class MetricResult:
-    score: float
+    score: float = 0
     details: list[EvalRecord] = field(default_factory=list)
 
 
 @dataclass
 class EvalSuite:
     reliability: list[EvalPair] | None = None
-    locality: dict[str, list[EvalPair]] | None = None
-    portability: dict[str, list[EvalPair]] | None = None
+    locality: list[EvalPair] | None = None
+    portability: list[EvalPair] | None = None
 
 
 @dataclass
 class EvalResult:
     reliability: MetricResult | None = None
-    locality: dict[str, MetricResult] | None = None
-    portability: dict[str, MetricResult] | None = None
-
-    def to_dict(self) -> dict:
-        d = {}
-        if self.reliability is not None:
-            d["reliability"] = asdict(self.reliability)
-        if self.locality is not None:
-            d["locality"] = {k: asdict(v) for k, v in self.locality.items()}
-        if self.portability is not None:
-            d["portability"] = {k: asdict(v) for k, v in self.portability.items()}
-        return d
+    locality: MetricResult | None = None
+    portability: MetricResult | None = None
 
 
-def evaluate_pairs(pairs: list[EvalPair],
-                   get_responses: Callable[[list[str]], list[str]]) -> MetricResult:
-    responses = get_responses([pair.prompt for pair in pairs])
-    records = [judge_response(pair.prompt, pair.expected_ans, response)
-               for pair, response in zip(pairs, responses)]
-    score = mean(record.match for record in records) if records else 0.0
-    return MetricResult(score, records)
+def get_model_prediction(model, tokenizer,
+                         prompts: list[str],
+                         prediction_max_len: int = 64) -> list[str]:
+    orig_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+    ).to(model.device)
+    tokenizer.padding_side = orig_padding_side
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            do_sample=False,
+            max_new_tokens=prediction_max_len,
+            repetition_penalty=1.5,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+
+    prompt_length = inputs["input_ids"].shape[1]
+    generated_ids = output_ids[:, prompt_length:]
+    return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 
-ENV_PATH = Path(__file__).parent.parent.parent / ".env"
-def _get_llm_client():
+def get_teacher_scores(model, tokenizer,
+                       records: list[EvalRecord],
+                       batch_size: int) -> None:
+    if not records:
+        return
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+
+    orig_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "right"
+
+    try:
+        with torch.no_grad():
+            for batch in batched(records, batch_size):
+                prompts = [record.prompt for record in batch]
+                answers = [record.ground_truth for record in batch]
+
+                combined_texts = [f"{prompt} {answer}" for prompt, answer in zip(prompts, answers)]
+                prompt_lens = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
+                               for prompt in prompts]
+
+                inputs = tokenizer(
+                    combined_texts,
+                    return_tensors="pt",
+                    padding=True,
+                    add_special_tokens=False,
+                ).to(model.device)
+
+                labels = inputs["input_ids"].clone()
+                for idx, prompt_len in enumerate(prompt_lens):
+                    labels[idx, :prompt_len] = -100
+
+                labels = labels.masked_fill(inputs["attention_mask"] == 0, -100)
+
+                outputs = model(**inputs)
+                logits = outputs.logits
+
+                shifted_logits = logits[:, :-1, :].float()
+                shifted_labels = labels[:, 1:]
+                valid_mask = shifted_labels != -100
+
+                predicted_tokens = shifted_logits.argmax(dim=-1)
+                correct = (predicted_tokens == shifted_labels) & valid_mask
+
+                token_counts = valid_mask.sum(dim=1).clamp_min(1)
+                scores = correct.sum(dim=1).float() / token_counts
+
+                for record, score in zip(batch, scores.tolist()):
+                    record.score = float(score)
+    finally:
+        tokenizer.padding_side = orig_padding_side
+
+
+async def get_judge_scores(records: list[EvalRecord],
+                           batch_size: int,
+                           max_concurrency: int = 5,
+                           max_retries: int = 3,
+                           init_retry_delay: float = 1.0,
+                           max_retry_delay: float = 10.0) -> None:
+    if not records:
+        return
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be > 0")
+    if max_retries < 0:
+        raise ValueError("max_retries must be >= 0")
+    if init_retry_delay <= 0:
+        raise ValueError("init_retry_delay must be > 0")
+    if max_retry_delay < init_retry_delay:
+        raise ValueError("max_retry_delay must be >= init_retry_delay")
+
+    client = AsyncOpenAI()
     model = os.environ["JUDGE_MODEL"]
-    assert model, "No JUDGE_MODEL set. Fill in JUDGE_MODEL in .env."
+    semaphore = asyncio.Semaphore(max_concurrency)
 
-    return OpenAI(), model
-
-
-def judge_response(prompt: str, expected_ans: str, predicted_ans: str) -> EvalRecord:
-    client, model = _get_llm_client()
-
-    llm_prompt = (
-        "Given the following prompt, expected answer and predicted answer, "
-        "determine whether the predicted answer correctly contains or conveys the expected answer.\n"
-        "The predicted answer may be longer or include extra details — answer True as long as the expected answer is present and not contradicted.\n\n"
-        f"Prompt: {prompt}\nExpected Answer: {expected_ans}\nPredicted Answer: {predicted_ans}\n\n"
-        "Your response must be exactly one word — either True or False. Do not add any punctuation, explanation, or extra text."
+    task_example = (
+        "=== EXAMPLE INPUT ===\n"
+        "Record 1:\n"
+        "Prompt: What is the capital of France?\n"
+        "Ground Truth: Paris\n"
+        "Prediction: The capital of France is Paris.\n\n"
+        "Record 2:\n"
+        "Prompt: The chemical symbol for water is\n"
+        "Ground Truth: H2O\n"
+        "Prediction: CO2\n\n"
+        "Record 3:\n"
+        "Prompt: The quick brown fox jumps over the\n"
+        "Ground Truth: lazy dog\n"
+        "Prediction: lazy lazy lazy dog dog\n\n"
+        "=== EXAMPLE OUTPUT ===\n"
+        "1\n"
+        "0\n"
+        "0\n"
+        "=== END EXAMPLE ===\n\n"
     )
 
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "You are a precise grading assistant."},
-            {"role": "user", "content": llm_prompt},
-        ],
-        temperature=0.0,
+    prompt_template = (
+        "You are given multiple evaluation records. "
+        "For each record, compare semantic consistency between Ground Truth and Prediction. "
+        "A Prediction can be longer, but should preserve the core meaning of Ground Truth without contradiction. "
+        "If the Prediction is corrupted, nonsensical, or dominated by repetitive tokens/phrases, score it as 0 regardless of overlap. "
+        "Respond with exactly {} lines, one per record in order. "
+        "Each line must contain only 1 or 0. No extra text.\n\n"
+        f"{task_example}"
+        "=== TASK INPUT (SCORE THIS PART ONLY) ===\n"
+        "{}"
     )
 
-    content = completion.choices[0].message.content
-    if content is None:
-        content = "False"
+    pending_records = records
 
-    content = content.strip()
-    if content not in {"True", "False"}:
-        content = "True" if content.lower().startswith("true") else "False"
+    async def _score_batch(batch: list[EvalRecord]) -> list[EvalRecord]:
+        async with semaphore:
+            task_input = "\n\n".join(
+                f"Record {i + 1}:\n"
+                f"Prompt: {record.prompt}\n"
+                f"Ground Truth: {record.ground_truth}\n"
+                f"Prediction: {record.prediction}"
+                for i, record in enumerate(batch)
+            )
 
-    return EvalRecord(prompt, expected_ans, predicted_ans, eval(content))
+            try:
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a precise grading assistant."},
+                        {"role": "user", "content": prompt_template.format(len(batch), task_input)},
+                    ],
+                    temperature=0.0,
+                )
+            except Exception:
+                return batch
 
+            content = completion.choices[0].message.content
+            if content is None:
+                return batch
 
-def judge_responses_batch(triples: list[tuple[str, str, str]],
-                          batch_size: int = 20) -> list[EvalRecord]:
-    client, model = _get_llm_client()
-    records: list[EvalRecord] = []
+            lines = [line.strip() for line in content.strip().splitlines()]
+            failed_records: list[EvalRecord] = []
 
-    for start in range(0, len(triples), batch_size):
-        chunk = triples[start : start + batch_size]
-        numbered = "\n\n".join(
-            f"Pair {i + 1}:\n"
-            f"Prompt: {prompt}\n"
-            f"Expected Answer: {expected}\n"
-            f"Predicted Answer: {predicted}"
-            for i, (prompt, expected, predicted) in enumerate(chunk)
-        )
-        llm_prompt = (
-            "You will be given multiple prompt-answer pairs. "
-            "For each pair, determine whether the predicted answer correctly contains or conveys the expected answer. "
-            "The predicted answer may be longer or include extra details — answer True as long as the expected answer is present and not contradicted.\n\n"
-            f"{numbered}\n\n"
-            f"Respond with exactly {len(chunk)} lines, one per pair in order. "
-            "Each line must contain only True or False. No extra text."
-        )
+            for record, line in zip(batch, lines):
+                try:
+                    record.score = float(line)
+                except Exception:
+                    failed_records.append(record)
 
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a precise grading assistant."},
-                {"role": "user", "content": llm_prompt},
-            ],
-            temperature=0.0,
-        )
+            failed_records.extend(batch[len(lines):])
 
-        content = completion.choices[0].message.content
-        if content is None:
-            content = "False\n" * len(chunk)
+            return failed_records
 
-        lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
-        # Pad or truncate to match chunk size
-        while len(lines) < len(chunk):
-            lines.append("False")
+    retry_count = -1
+    delay = 0
+    while pending_records and retry_count < max_retries:
+        await asyncio.sleep(delay)
 
-        for (prompt, expected, predicted), line in zip(chunk, lines):
-            match = line in {"True", "False"}
-            if not match:
-                line = "True" if line.lower().startswith("true") else "False"
-            records.append(EvalRecord(prompt, expected, predicted, eval(line)))
+        tasks = [_score_batch(list(batch)) for batch in batched(pending_records, batch_size)]
+        failed_batches = await asyncio.gather(*tasks)
 
-    return records
+        pending_records = [record for failed_batch in failed_batches for record in failed_batch]
+        retry_count += 1
+        delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+
+    for record in pending_records:
+        record.score = 1e-9
 
 
-def clean_response(response: str) -> str:
-    response = response.lstrip()
-
-    newline_pos = response.find("\n")
-    if newline_pos != -1:
-        response = response[:newline_pos]
-
-    m = re.search(r'.*[.!?]', response, re.DOTALL)
-    if m:
-        response = m.group()
-
-    return response.rstrip()
-
-
-RESULTS_DIR = Path(__file__).parent.parent.parent / "data" / "results"
-def save_results(results: list[dict],
-                 method: str, dataset: str, model: str,
-                 steps: int, non_seq_per_step: int) -> Path:
-    dest = RESULTS_DIR / method
-    dest.mkdir(parents=True, exist_ok=True)
-    path = dest / f"{dataset}_{model}_{steps}_{non_seq_per_step}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    return path
+# RESULTS_DIR = Path(__file__).parent.parent.parent / "data" / "results"
+# def save_results(results: list[dict],
+#                  method: str, dataset: str, model: str,
+#                  steps: int, non_seq_per_step: int) -> Path:
+#     dest = RESULTS_DIR / method
+#     dest.mkdir(parents=True, exist_ok=True)
+#     path = dest / f"{dataset}_{model}_{steps}_{non_seq_per_step}.json"
+#     with open(path, "w", encoding="utf-8") as f:
+#         json.dump(results, f, indent=2, ensure_ascii=False)
+#     return path

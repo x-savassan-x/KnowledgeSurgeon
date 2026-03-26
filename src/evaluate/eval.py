@@ -1,138 +1,70 @@
-import torch
-
-from functools import partial
+from dataclasses import asdict
+from itertools import batched
 from statistics import mean
+from typing import Literal
 
 from .eval_utils import (
-    EvalSuite, EvalResult, MetricResult,
-    evaluate_pairs, clean_response,
-    judge_responses_batch,
+    EvalPair,
+    EvalRecord,
+    MetricResult,
+    EvalSuite,
+    EvalResult,
+    get_model_prediction,
+    get_teacher_scores,
+    get_judge_scores,
 )
 
 
-def evaluate(model, tokenizer, eval_suite: EvalSuite) -> EvalResult:
-    get_model_responses = partial(get_responses, model, tokenizer)
-
-    result = EvalResult()
-
-    if eval_suite.reliability is not None:
-        eval_pairs = eval_suite.reliability
-        result.reliability = evaluate_pairs(eval_pairs, get_model_responses)
-
-    if eval_suite.locality is not None:
-        result.locality = {loc_type: evaluate_pairs(eval_pairs, get_model_responses)
-                           for loc_type, eval_pairs in eval_suite.locality.items()}
-
-    if eval_suite.portability is not None:
-        result.portability = {port_type: evaluate_pairs(eval_pairs, get_model_responses)
-                              for port_type, eval_pairs in eval_suite.portability.items()}
-
-    return result
-
-
-def evaluate_batch(model, tokenizer,
+async def evaluate(model, tokenizer,
                    eval_suites: list[EvalSuite],
-                   inference_batch_size: int = 32,
-                   judge_batch_size: int = 20) -> list[EvalResult]:
-    """Evaluate multiple EvalSuites with batched model inference and batched LLM judging."""
+                   method: Literal["teacher-forcing", "llm-judge"],
+                   batch_size: int = 16) -> list[EvalResult]:
 
-    # --- Step 1: collect every prompt with its origin ---
-    # origin = (suite_idx, metric, sub_key | None, pair_idx)
-    all_prompts: list[str] = []
-    origins: list[tuple[int, str, str | None, int]] = []
+    def _prepare_result_from_suite(suite: EvalSuite) -> EvalResult:
+        def _prepare_metric_result(pairs: list[EvalPair] | None) -> MetricResult | None:
+            return MetricResult(details=[EvalRecord(**asdict(pair)) for pair in pairs])\
+                if pairs else None
+        return EvalResult(_prepare_metric_result(suite.reliability),
+                          _prepare_metric_result(suite.locality),
+                          _prepare_metric_result(suite.portability))
 
-    for si, suite in enumerate(eval_suites):
-        if suite.reliability:
-            for pi, pair in enumerate(suite.reliability):
-                origins.append((si, "reliability", None, pi))
-                all_prompts.append(pair.prompt)
-        if suite.locality:
-            for key, pairs in suite.locality.items():
-                for pi, pair in enumerate(pairs):
-                    origins.append((si, "locality", key, pi))
-                    all_prompts.append(pair.prompt)
-        if suite.portability:
-            for key, pairs in suite.portability.items():
-                for pi, pair in enumerate(pairs):
-                    origins.append((si, "portability", key, pi))
-                    all_prompts.append(pair.prompt)
+    def _get_all_records_from_result(result: EvalResult) -> list[EvalRecord]:
+        def _extract_records(metric_result: MetricResult | None) -> list[EvalRecord]:
+            return metric_result.details\
+                if metric_result else []
+        return _extract_records(result.reliability)\
+             + _extract_records(result.locality)\
+             + _extract_records(result.portability)
 
-    if not all_prompts:
-        return [EvalResult() for _ in eval_suites]
+    def _update_result(result: EvalResult):
+        def _update_metric_result(metric_result: MetricResult | None):
+            if metric_result:
+                metric_result.score = mean(r.score for r in metric_result.details)
+        _update_metric_result(result.reliability)
+        _update_metric_result(result.locality)
+        _update_metric_result(result.portability)
 
-    # --- Step 2: batched model inference ---
-    all_responses: list[str] = []
-    for start in range(0, len(all_prompts), inference_batch_size):
-        chunk = all_prompts[start : start + inference_batch_size]
-        all_responses.extend(get_responses(model, tokenizer, chunk))
+    results: list[EvalResult] = [_prepare_result_from_suite(suite) for suite in eval_suites]
+    records: list[EvalRecord] = [record
+                                 for result in results
+                                 for record in _get_all_records_from_result(result)]
 
-    # --- Step 3: build judge triples ---
-    def _get_pair(suite, metric, key, pair_idx):
-        if metric == "reliability":
-            return suite.reliability[pair_idx]
-        elif metric == "locality":
-            return suite.locality[key][pair_idx]
-        else:
-            return suite.portability[key][pair_idx]
+    if not records:
+        return results
 
-    triples = []
-    for (si, metric, key, pi), response in zip(origins, all_responses):
-        pair = _get_pair(eval_suites[si], metric, key, pi)
-        triples.append((pair.prompt, pair.expected_ans, response))
-
-    # --- Step 4: batched LLM judging ---
-    all_records = judge_responses_batch(triples, batch_size=judge_batch_size)
-
-    # --- Step 5: distribute records back into EvalResults ---
-    results = [EvalResult() for _ in eval_suites]
-
-    # Pre-build per-suite metric buckets
-    buckets: dict[tuple[int, str, str | None], list] = {}
-    for rec, (si, metric, key, _pi) in zip(all_records, origins):
-        bucket_key = (si, metric, key)
-        buckets.setdefault(bucket_key, []).append(rec)
-
-    for (si, metric, key), records in buckets.items():
-        score = mean(r.match for r in records) if records else 0.0
-        mr = MetricResult(score, records)
-        if metric == "reliability":
-            results[si].reliability = mr
-        elif metric == "locality":
-            assert key is not None
-            loc = results[si].locality or {}
-            loc[key] = mr
-            results[si].locality = loc
-        else:
-            assert key is not None
-            port = results[si].portability or {}
-            port[key] = mr
-            results[si].portability = port
+    match method:
+        case "teacher-forcing":
+            get_teacher_scores(model, tokenizer, records, batch_size)
+            for result in results:
+                _update_result(result)
+        case "llm-judge":
+            for batch in batched(records, batch_size):
+                prompts = [record.prompt for record in batch]
+                prediction = get_model_prediction(model, tokenizer, prompts)
+                for record, pred in zip(batch, prediction):
+                    record.prediction = pred
+            await get_judge_scores(records, batch_size)
+            for result in results:
+                _update_result(result)
 
     return results
-
-
-def get_responses(model, tokenizer, prompts: list[str]) -> list[str]:
-    orig_pad_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"
-
-    inputs = tokenizer(
-        prompts,
-        return_tensors="pt",
-        padding=True,
-    ).to(model.device)
-
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=20,
-            do_sample=False,
-            repetition_penalty=1.25,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-
-    prompt_length = inputs["input_ids"].shape[1]
-    generated_ids = output_ids[:, prompt_length:]
-    responses = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-
-    tokenizer.padding_side = orig_pad_side
-    return [clean_response(response) for response in responses]
