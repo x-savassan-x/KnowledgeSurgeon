@@ -5,6 +5,7 @@ from itertools import batched
 
 import torch
 from openai import AsyncOpenAI
+from tqdm.auto import tqdm
 
 
 @dataclass
@@ -41,7 +42,7 @@ class EvalResult:
     portability: MetricResult | None = None
 
 
-def get_model_prediction(
+def get_model_predictions(
     model, tokenizer,
     prompts: list[str],
     **config
@@ -51,9 +52,7 @@ def get_model_prediction(
         return []
 
     default_config = {
-        "pad_token_id": tokenizer.pad_token_id\
-                        if tokenizer.pad_token_id is not None\
-                        else tokenizer.eos_token_id,
+        "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
         "repetition_penalty": 1.5,
         "max_new_tokens": 128,
@@ -93,7 +92,11 @@ def get_teacher_scores(
     tokenizer.padding_side = "right"
 
     try:
-        with torch.no_grad():
+        with torch.no_grad(),\
+             tqdm(total=len(records),
+                  desc="Teacher Evaluation",
+                  unit="record") as pbar:
+
             for batch in batched(records, batch_size):
                 prompts = [record.prompt for record in batch]
                 answers = [record.ground_truth for record in batch]
@@ -130,6 +133,8 @@ def get_teacher_scores(
 
                 for record, score in zip(batch, scores.tolist()):
                     record.score = float(score)
+
+                pbar.update(len(batch))
     finally:
         tokenizer.padding_side = orig_padding_side
 
@@ -161,7 +166,6 @@ async def get_judge_scores(
 
     client = AsyncOpenAI()
     model = os.environ["JUDGE_MODEL"]
-    semaphore = asyncio.Semaphore(max_concurrency)
 
     task_example = (
         "=== EXAMPLE INPUT ===\n"
@@ -198,6 +202,7 @@ async def get_judge_scores(
 
     pending_records = records
 
+    semaphore = asyncio.Semaphore(max_concurrency)
     async def _score_batch(batch: list[EvalRecord]) -> list[EvalRecord]:
         async with semaphore:
             task_input = "\n\n".join(
@@ -239,15 +244,26 @@ async def get_judge_scores(
 
     retry_count = -1
     delay = 0
-    while pending_records and retry_count < max_retries:
-        await asyncio.sleep(delay)
+    with tqdm(total=len(records),
+              desc="LLM Judge Evaluation",
+              unit="record") as pbar:
+        while pending_records and retry_count < max_retries:
+            await asyncio.sleep(delay)
 
-        tasks = [_score_batch(list(batch)) for batch in batched(pending_records, batch_size)]
-        failed_batches = await asyncio.gather(*tasks)
+            tasks = [_score_batch(list(batch))
+                     for batch in batched(pending_records, batch_size)]
+            failed_batches = await asyncio.gather(*tasks)
+            failed_records = [record
+                              for failed_batch in failed_batches
+                              for record in failed_batch]
 
-        pending_records = [record for failed_batch in failed_batches for record in failed_batch]
-        retry_count += 1
-        delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+            pbar.update(len(pending_records) - len(failed_records))
+            pending_records = failed_records
 
-    for record in pending_records:
-        record.score = 1e-9
+            retry_count += 1
+            delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+
+        for record in pending_records:
+            record.score = 1e-9
+
+        pbar.update(len(pending_records))

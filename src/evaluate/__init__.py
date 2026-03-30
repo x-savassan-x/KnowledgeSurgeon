@@ -5,7 +5,7 @@ from .eval_utils import (
     MetricResult,
     EvalSuite,
     EvalResult,
-    get_model_prediction,
+    get_model_predictions,
     get_teacher_scores,
     get_judge_scores
 )

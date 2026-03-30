@@ -13,7 +13,11 @@ class Editor(ABC):
             config.model_name,
             dtype=torch.bfloat16 if config.fp16 else torch.float32,
         ).cuda(config.gpu_id)
+
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+        if not self.tokenizer.pad_token:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
         self.config = config
 
     @abstractmethod

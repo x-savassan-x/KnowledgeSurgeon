@@ -9,7 +9,7 @@ from .eval_utils import (
     MetricResult,
     EvalSuite,
     EvalResult,
-    get_model_prediction,
+    get_model_predictions,
     get_teacher_scores,
     get_judge_scores,
 )
@@ -61,13 +61,15 @@ async def evaluate(
             get_teacher_scores(model, tokenizer, records, batch_size)
             for result in results:
                 _update_result(result)
+
         case "llm_judge":
             for batch in batched(records, batch_size):
                 prompts = [record.prompt for record in batch]
-                prediction = get_model_prediction(model, tokenizer, prompts,
-                                                  **kwargs.get("model_generation_config", {}))
-                for record, pred in zip(batch, prediction):
-                    record.prediction = pred
+                predictions = get_model_predictions(model, tokenizer, prompts,
+                                                    **kwargs.get("model_generation_config", {}))
+                for record, prediction in zip(batch, predictions):
+                    record.prediction = prediction
+
             await get_judge_scores(records, batch_size,
                                    **kwargs.get("llm_judge_config", {}))
             for result in results:
