@@ -1,5 +1,7 @@
 data/
 src_orig/
+notebook/test.ipynb
+notebook/data.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

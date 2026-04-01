@@ -38,68 +38,62 @@ class Codebook(torch.nn.Module):
                 new_value = torch.nn.Parameter(output[:, token_to_edit, :].detach())
 
         if self.keys is None:
-            self.init_key_value(query, new_value)
+            self.keys = query.detach()
+            self.values = new_value
+            self.epsilons = torch.tensor(self.config.eps_init, device=self.device).view(1)
+            self.key_labels = [self.edit_label]
 
         elif self.iter == 0:
-            dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
-            smallest_distance, nearest_key = dists.min(0)
+            dists = torch.cdist(self.keys.float(), query.float())
+            min_dist, nearest_key = dists.min(0)
 
-            if smallest_distance > self.config.eps_init + self.epsilons[nearest_key]:
-                self.add_key(query, new_value)
+            if min_dist > self.config.eps_init + self.epsilons[nearest_key]:
+                self._add_key_val(query, new_value)
             else:
                 if not self.label_match(self.edit_label, self.key_labels[nearest_key]):
-                    self.add_key(query, new_value)
-                    self.split_epsilons_in_half(nearest_key, smallest_distance)
-                elif smallest_distance > self.epsilons[nearest_key]:
-                    self.epsilons[nearest_key] = smallest_distance
+                    self._add_key_val(query, new_value)
+                    self.split_epsilons_in_half(nearest_key, min_dist)
+                elif min_dist > self.epsilons[nearest_key]:
+                    self.epsilons[nearest_key] = min_dist
 
-        dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
-        smallest_dist, chosen_key = dists.min(0)
-        smallest_dist = smallest_dist.view(-1, 1)
+        dists = torch.cdist(self.keys.float(), query.float())
+        min_dist, chosen_key = dists.min(0)
+        min_dist = min_dist.view(-1, 1)
         chosen_value = self.values[chosen_key]
         eps = self.epsilons[chosen_key].view(-1, 1)
 
         match self.config.replace_strat:
             case "replace_last":
                 output[:, token_to_edit, :] = torch.where(
-                    (smallest_dist <= eps),
+                    (min_dist <= eps),
                     chosen_value,
                     output[:, token_to_edit, :]
                 )
             case "replace_prompt":
                 output[:, :token_to_edit, :] = torch.where(
-                    (smallest_dist <= eps),
+                    (min_dist <= eps),
                     chosen_value,
                     output[:, :token_to_edit, :]
                 )
             case "replace_all":
                 output = torch.where(
-                    (smallest_dist <= eps).view(-1, 1, 1),
+                    (min_dist <= eps).view(-1, 1, 1),
                     chosen_value.unsqueeze(1).repeat_interleave(output.shape[1], 1),
                     output,
                 )
 
         return output
 
-    def init_key_value(self, query: torch.Tensor, value: torch.nn.Parameter):
-        self.keys = query.detach()
-        self.values = value
-        self.epsilons = torch.tensor(self.config.eps_init, device=self.device).view(1)
-        self.key_labels = [self.edit_label]
-
-    def add_key(self, key: torch.Tensor, value: torch.nn.Parameter):
+    def _add_key_val(self, key: torch.Tensor, value: torch.nn.Parameter):
         self.keys = torch.vstack([self.keys, key.detach()])
-
         self.values = torch.nn.Parameter(torch.vstack([self.values, value]))
-
         new_epsilon = torch.tensor(self.config.eps_init, device=self.device).view(1)
         self.epsilons = torch.vstack([self.epsilons, new_epsilon])
-
-        self.key_labels.append(self.edit_label)
+        self.key_labels = self.key_labels + [self.edit_label] if self.key_labels else [self.edit_label]
 
     def label_match(self, edit_label: torch.Tensor, key_label: torch.Tensor):
         return edit_label.float().mean() == key_label.float().mean()
 
-    def split_epsilons_in_half(self, nearest_key: torch.Tensor, smallest_distance: torch.Tensor):
-        self.epsilons[nearest_key] = (smallest_distance / 2) - 1e-5
-        self.epsilons[-1] = smallest_distance / 2
+    def split_epsilons_in_half(self, nearest_key: torch.Tensor, min_dist: torch.Tensor):
+        self.epsilons[nearest_key] = (min_dist / 2) - 1e-5
+        self.epsilons[-1] = min_dist / 2

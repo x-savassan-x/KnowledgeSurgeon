@@ -30,7 +30,7 @@ class GRACE(Editor):
         self._checkpoint = None
 
     def _apply(self, request: EditRequest):
-        prompt, ans = request.prompt, request.new_ans
+        prompt, ans = request.prompt, request.new_ground_truth
         tokens = self.tokenizer(f"{prompt} {ans}", return_tensors="pt")
         tokens["labels"] = tokens["input_ids"].clone()
         prompt_tokens_len = len(self.tokenizer.encode(prompt))
@@ -67,7 +67,7 @@ class GRACE(Editor):
         if self._checkpoint is None:
             self.reset()
         else:
-            self.codebook.keys       = self._checkpoint["keys"]
+            self.codebook.keys       = self._checkpoint["keys"].clone()
             self.codebook.values     = torch.nn.Parameter(self._checkpoint["values"].clone())
-            self.codebook.epsilons   = self._checkpoint["epsilons"]
+            self.codebook.epsilons   = self._checkpoint["epsilons"].clone()
             self.codebook.key_labels = list(self._checkpoint["key_labels"])

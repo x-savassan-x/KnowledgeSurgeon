@@ -29,8 +29,8 @@ class AlphaEdit(Editor):
         ee_request = [{
             "prompt": request.prompt.replace(request.subject, "{}"),
             "subject": request.subject,
-            "target_new": request.new_ans,
-            "target_true": request.old_ans,
+            "target_new": request.new_ground_truth,
+            "target_true": request.old_ground_truth,
         }]
         _, weights_copy = apply_AlphaEdit_to_model(
             self.model, self.tokenizer, ee_request, self.config,

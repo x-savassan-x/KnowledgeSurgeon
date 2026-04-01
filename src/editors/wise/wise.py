@@ -30,7 +30,7 @@ class WISE(Editor):
     def _apply(self, request: EditRequest):
         ee_request = [{
             "prompt": request.prompt,
-            "target_new": " " + request.new_ans,
+            "target_new": " " + request.new_ground_truth,
             "loc_prompt": request.subject,
         }]
 

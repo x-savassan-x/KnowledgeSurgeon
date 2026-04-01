@@ -180,12 +180,12 @@ async def get_judge_scores(
         "Record 3:\n"
         "Prompt: The quick brown fox jumps over the\n"
         "Ground Truth: lazy dog\n"
-        "Prediction: lazy lazy lazy dog dog\n\n"
+        "Prediction: lazy lazy lazy dog dog\n"
         "=== EXAMPLE OUTPUT ===\n"
         "1\n"
         "0\n"
         "0\n"
-        "=== END EXAMPLE ===\n\n"
+        "=== END EXAMPLE ==="
     )
 
     prompt_template = (
@@ -195,7 +195,7 @@ async def get_judge_scores(
         "If the Prediction is corrupted, nonsensical, or dominated by repetitive tokens/phrases, score it as 0 regardless of overlap. "
         "Respond with exactly {} lines, one per record in order. "
         "Each line must contain only 1 or 0. No extra text.\n\n"
-        f"{task_example}"
+        f"{task_example}\n\n"
         "=== TASK INPUT (SCORE THIS PART ONLY) ===\n"
         "{}"
     )

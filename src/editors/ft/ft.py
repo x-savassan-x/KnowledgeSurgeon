@@ -22,7 +22,7 @@ class FT(Editor):
 
     def _apply(self, request: EditRequest):
         device = torch.device(f"cuda:{self.config.gpu_id}")
-        target = " " + request.new_ans  # space required for correct tokenization
+        target = " " + request.new_ground_truth  # space required for correct tokenization
 
         # Find target weights
         weights = {
