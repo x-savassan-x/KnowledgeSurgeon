@@ -4,6 +4,7 @@ from ..config import Config
 
 @dataclass
 class AlphaEditConfig(Config):
+    # Method
     layers: list[int] = field(default_factory=list)
     layer_selection: str = "all"
     fact_token: str = "subject_last"
@@ -19,6 +20,7 @@ class AlphaEditConfig(Config):
     max_length: int = 40
     batch_size: int = 1
 
+    # Module templates
     rewrite_module_tmp: str = ""
     layer_module_tmp: str = ""
     mlp_module_tmp: str = ""
@@ -26,6 +28,7 @@ class AlphaEditConfig(Config):
     ln_f_module: str = ""
     lm_head_module: str = ""
 
+    # Statistics
     mom2_dataset: str = "wikipedia"
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"

@@ -148,10 +148,10 @@ async def get_judge_scores(
     if not records:
         return
 
-    max_concurrency = config.get("max_concurrency", 5)
-    max_retries = config.get("max_retries", 3)
+    max_concurrency = config.get("max_concurrency", 20)
+    max_retries = config.get("max_retries", 5)
     init_retry_delay = config.get("init_retry_delay", 1.0)
-    max_retry_delay = config.get("max_retry_delay", 10.0)
+    max_retry_delay = config.get("max_retry_delay", 30.0)
 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
@@ -163,9 +163,6 @@ async def get_judge_scores(
         raise ValueError("init_retry_delay must be > 0")
     if max_retry_delay < init_retry_delay:
         raise ValueError("max_retry_delay must be >= init_retry_delay")
-
-    client = AsyncOpenAI()
-    model = os.environ["JUDGE_MODEL"]
 
     task_example = (
         "=== EXAMPLE INPUT ===\n"
@@ -200,10 +197,11 @@ async def get_judge_scores(
         "{}"
     )
 
-    pending_records = records
-
+    client = AsyncOpenAI()
+    model = os.environ["JUDGE_MODEL"]
     semaphore = asyncio.Semaphore(max_concurrency)
-    async def _score_batch(batch: list[EvalRecord]) -> list[EvalRecord]:
+
+    async def _score_batch(batch: list[EvalRecord]) -> tuple[list[EvalRecord], int]:
         async with semaphore:
             task_input = "\n\n".join(
                 f"Record {i + 1}:\n"
@@ -223,11 +221,11 @@ async def get_judge_scores(
                     temperature=0.0,
                 )
             except Exception:
-                return batch
+                return batch, 0
 
             content = completion.choices[0].message.content
             if content is None:
-                return batch
+                return batch, 0
 
             lines = [line.strip() for line in content.strip().splitlines()]
             failed_records: list[EvalRecord] = []
@@ -240,28 +238,38 @@ async def get_judge_scores(
 
             failed_records.extend(batch[len(lines):])
 
-            return failed_records
+            return failed_records, len(batch) - len(failed_records)
 
+    pending_records = records
     retry_count = -1
     delay = 0
+
     with tqdm(total=len(records),
               desc="LLM Judge Evaluation",
               unit="record") as pbar:
         while pending_records and retry_count < max_retries:
             await asyncio.sleep(delay)
+            pbar.write(
+                f"Evaluating {len(pending_records)} records. "
+                f"{max_retries - 1 - retry_count} retries left."
+            )
 
-            tasks = [_score_batch(list(batch))
+            tasks = [asyncio.create_task(_score_batch(list(batch)))
                      for batch in batched(pending_records, batch_size)]
-            failed_batches = await asyncio.gather(*tasks)
-            failed_records = [record
-                              for failed_batch in failed_batches
-                              for record in failed_batch]
 
-            pbar.update(len(pending_records) - len(failed_records))
+            failed_records: list[EvalRecord] = []
+            for task in asyncio.as_completed(tasks):
+                failed_batch, passed_count = await task
+                failed_records.extend(failed_batch)
+                pbar.update(passed_count)
+
             pending_records = failed_records
 
             retry_count += 1
             delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+
+            if pending_records:
+                pbar.write(f"Failed records found. Retrying in {delay} seconds...")
 
         for record in pending_records:
             record.score = 1e-9

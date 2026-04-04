@@ -4,6 +4,7 @@ from ..config import Config
 
 @dataclass
 class RomeConfig(Config):
+    # Method
     layers: list[int] = field(default_factory=list)
     fact_token: str = "subject_last"
     v_num_grad_steps: int = 20
@@ -16,6 +17,7 @@ class RomeConfig(Config):
     context_template_length_params: list[list[int]] = field(default_factory=lambda: [[5, 10], [10, 10]])
     max_length: int = 40
 
+    # Module templates
     rewrite_module_tmp: str = ""
     layer_module_tmp: str = ""
     mlp_module_tmp: str = ""
@@ -23,6 +25,7 @@ class RomeConfig(Config):
     ln_f_module: str = ""
     lm_head_module: str = ""
 
+    # Statistics
     mom2_dataset: str = "wikipedia"
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"

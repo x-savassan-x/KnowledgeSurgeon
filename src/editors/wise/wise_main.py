@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any, Dict, List, Tuple
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -11,9 +12,13 @@ def apply_wise_to_model(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
+    copy=False,
     **kwargs: Any,
 ) -> Tuple[WISEModule, dict]:
-    device = f'cuda:{hparams.device}'
+    if copy:
+        model = deepcopy(model)
+
+    device = hparams.device
     context_templates = get_context_templates(
         model, tok,
         length_params=[[5, 5], [10, 5]],

@@ -9,16 +9,17 @@ from ..config import Config
 
 class Editor(ABC):
     def __init__(self, config: Config):
+        self.config = config
+        self.device = config.device
+
         self.model = AutoModelForCausalLM.from_pretrained(
             config.model_name,
             dtype=torch.bfloat16 if config.fp16 else torch.float32,
-        ).cuda(config.gpu_id)
+        ).to(self.device)
 
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        self.config = config
 
     @abstractmethod
     def edit(self, request: EditRequest):...

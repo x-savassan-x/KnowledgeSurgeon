@@ -1,203 +1,323 @@
 import json
-import re
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import pandas as pd
 from IPython.display import display
 
+from .io import EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
 
-EVALUATION_DIR = Path(__file__).parent.parent / "data" / "evaluation"
-METRICS = ["success", "locality", "portability"]
-FILE_PATTERN = re.compile(
-    r"^(?P<model>.+)_(?P<dataset>cfact|mquake)_(?P<milestones>\d+(?:-\d+)*)\.json$"
-)
+
+METRIC_ORDER: list[tuple[str, str]] = [
+    ("ES", "success"),
+    ("Loc", "locality"),
+    ("Port", "portability"),
+]
+
+
+def _normalize_filter(values: str | list[str] | None) -> set[str] | None:
+    if values is None:
+        return None
+    if isinstance(values, str):
+        return {values}
+    return set(values)
+
+
+def _normalize_milestones(milestones: list[int]) -> list[int]:
+    normalized = sorted({int(step) for step in milestones})
+    if not normalized:
+        raise ValueError("milestones must not be empty")
+    if normalized[0] <= 0:
+        raise ValueError("milestones must be positive integers")
+    return normalized
+
+
+def _score_from_metric(metric_value: Any) -> float | None:
+    if metric_value is None:
+        return None
+    if isinstance(metric_value, dict):
+        score = metric_value.get("score")
+        if score is None:
+            return None
+        return float(score)
+    if isinstance(metric_value, (int, float)):
+        return float(metric_value)
+    return None
+
+
+def _extract_score_series_from_records(
+    records: list[dict[str, Any]],
+    metric_name: str,
+    milestones: list[int],
+) -> list[float | None]:
+    score_by_step: dict[int, float | None] = {step: None for step in milestones}
+    for record in records:
+        step = record.get("step")
+        if not isinstance(step, int) or step not in score_by_step:
+            continue
+        result = record.get("result", record)
+        if not isinstance(result, dict):
+            continue
+        score = _score_from_metric(result.get(metric_name))
+        if score is not None:
+            score_by_step[step] = score
+
+    return [score_by_step[step] for step in milestones]
+
+
+def catalog_results(
+    evaluation_dir: Path | str | None = None,
+    variant: str | None = None,
+    model: str | None = None,
+) -> pd.DataFrame:
+    """Return one row per saved result file."""
+    rows: list[dict[str, Any]] = []
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+    variant_filter = _normalize_filter(variant)
+    model_filter = _normalize_filter(model)
+
+    for path in iter_result_files(root):
+        loaded = load_result_file(path, root)
+        if loaded is None:
+            continue
+
+        meta, records = loaded
+        run_variant = str(meta["variant"])
+        run_model = str(meta["model"])
+
+        if variant_filter and run_variant not in variant_filter:
+            continue
+        if model_filter and run_model not in model_filter:
+            continue
+
+        rows.append(
+            {
+                "variant": run_variant,
+                "model": run_model,
+                "method": meta["method"],
+                "milestones": milestones_to_str(meta["milestones"]),
+                "dataset_name": meta["dataset_name"],
+                "num_records": len(records),
+                "path": str(path.relative_to(root)) if path.is_relative_to(root) else str(path),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "variant",
+                "model",
+                "method",
+                "milestones",
+                "dataset_name",
+                "num_records",
+                "path",
+            ]
+        )
+
+    return pd.DataFrame(rows).sort_values(["variant", "model", "milestones", "method", "dataset_name"])
+
+
+def _method_directory(
+    variant: str,
+    model: str,
+    method: str,
+    evaluation_dir: Path | str | None = None,
+) -> Path:
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+    return root / variant / model / method
+
+
+def _load_method_metrics(
+    variant: str,
+    model: str,
+    method: str,
+    milestones: list[int],
+    evaluation_dir: Path | str | None = None,
+) -> dict[str, list[float | None]] | None:
+    milestones_dir = milestones_to_str(milestones)
+    method_dir = _method_directory(variant, model, method, evaluation_dir)
+    cfact_path = method_dir / milestones_dir / "cfact.json"
+    mquake_path = method_dir / milestones_dir / "mquake.json"
+
+    # Only include complete methods for this milestone configuration.
+    if not cfact_path.exists() or not mquake_path.exists():
+        return None
+
+    # Plain json loads are intentionally used to preserve the pipeline schema.
+    with open(cfact_path, encoding="utf-8") as file:
+        cfact_records = json.load(file)
+    with open(mquake_path, encoding="utf-8") as file:
+        mquake_records = json.load(file)
+
+    return {
+        "success": _extract_score_series_from_records(cfact_records, "success", milestones),
+        "locality": _extract_score_series_from_records(cfact_records, "locality", milestones),
+        "portability": _extract_score_series_from_records(mquake_records, "portability", milestones),
+    }
 
 
 def load_results(
+    variant: str,
+    model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
-) -> dict[tuple[str, str], dict[str, list[float | None]]]:
-    """Load evaluation files matching the given milestones.
+    methods: str | list[str] | None = None,
+) -> dict[str, dict[str, list[float | None]]]:
+    """Load scores keyed by method for one variant/model and milestone setting."""
+    milestones = _normalize_milestones(milestones)
+    method_filter = _normalize_filter(methods)
 
-    Returns
-    -------
-    {(method, model): {"success": [score_m1, ...],
-                       "locality": [...],
-                       "portability": [...]}}
-    """
-    milestones = sorted(milestones)
-    if not milestones:
-        raise ValueError("milestones must not be empty")
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+    model_dir = root / variant / model
+    data: dict[str, dict[str, list[float | None]]] = {}
 
-    milestone_str = "-".join(str(milestone) for milestone in milestones)
-    step_to_index = {step: index for index, step in enumerate(milestones)}
-    evaluation_dir = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
-
-    data: dict[tuple[str, str], dict[str, list[float | None]]] = {}
-
-    if not evaluation_dir.exists():
+    if not model_dir.exists():
         return data
 
-    for method_dir in sorted(evaluation_dir.iterdir()):
+    for method_dir in sorted(model_dir.iterdir()):
         if not method_dir.is_dir():
             continue
-        method = method_dir.name
+        method_name = method_dir.name
+        if method_filter and method_name not in method_filter:
+            continue
 
-        for fpath in sorted(method_dir.iterdir()):
-            match = FILE_PATTERN.match(fpath.name)
-            if not match:
-                continue
-            if match["milestones"] != milestone_str:
-                continue
-
-            dataset = match["dataset"]
-            model = match["model"]
-            key = (method, model)
-
-            if key not in data:
-                data[key] = {metric: [None] * len(milestones) for metric in METRICS}
-
-            with open(fpath, encoding="utf-8") as file:
-                records = json.load(file)
-
-            for record in records:
-                step = record.get("step")
-                if step not in step_to_index:
-                    continue
-                index = step_to_index[step]
-
-                result = record.get("result", record)
-                if dataset == "cfact":
-                    success = result.get("success")
-                    locality = result.get("locality")
-                    if success is not None:
-                        data[key]["success"][index] = success.get("score")
-                    if locality is not None:
-                        data[key]["locality"][index] = locality.get("score")
-                elif dataset == "mquake":
-                    portability = result.get("portability")
-                    if portability is not None:
-                        data[key]["portability"][index] = portability.get("score")
+        metrics = _load_method_metrics(
+            variant=variant,
+            model=model,
+            method=method_name,
+            milestones=milestones,
+            evaluation_dir=root,
+        )
+        if metrics is None:
+            continue
+        data[method_name] = metrics
 
     return data
 
 
-def _collect_axes(data: dict[tuple[str, str], dict[str, list[float | None]]]) -> tuple[list[str], list[str]]:
-    methods = sorted({method for method, _ in data})
-    models = sorted({model for _, model in data})
-    return methods, models
-
-
 def plot_results(
+    variant: str,
+    model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
-    figsize_per_cell: tuple[float, float] = (4.5, 3.5),
+    methods: str | list[str] | None = None,
+    figsize: tuple[float, float] = (15.0, 4.0),
 ) -> None:
-    """Draw a grid of line graphs for success, locality, and portability."""
-    milestones = sorted(milestones)
-    data = load_results(milestones, evaluation_dir)
+    """Draw three side-by-side line charts: ES, Loc, and Port."""
+    milestones = _normalize_milestones(milestones)
+    data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
     if not data:
-        print("No result files found.")
+        print("No result files found for the selected variant/model/milestones.")
         return
 
-    methods, models = _collect_axes(data)
-    n_rows, n_cols = len(models), len(methods)
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(figsize_per_cell[0] * n_cols, figsize_per_cell[1] * n_rows),
-        squeeze=False,
-    )
+    methods_sorted = sorted(data.keys())
+    cmap = plt.colormaps.get_cmap("tab10")
+    method_colors = {
+        method_name: cmap(index % max(1, len(cmap.colors)))
+        for index, method_name in enumerate(methods_sorted)
+    }
 
-    x = milestones
+    fig, axes = plt.subplots(1, 3, figsize=figsize, squeeze=False)
+    axes_row = axes[0]
 
-    for row_index, model in enumerate(models):
-        for col_index, method in enumerate(methods):
-            ax = axes[row_index][col_index]
-            key = (method, model)
-            scores = data.get(key)
+    for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
+        ax = axes_row[metric_index]
+        has_any_line = False
 
-            if scores is None:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "no data",
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
-                    fontsize=9,
-                    color="gray",
-                )
-            else:
-                for metric in METRICS:
-                    values = scores[metric]
-                    if any(value is not None for value in values):
-                        ax.plot(x, values, marker="o", markersize=4, label=metric)
-                ax.legend(fontsize=7)
+        for method_name in methods_sorted:
+            values = data[method_name][metric_name]
+            if not any(value is not None for value in values):
+                continue
+            ax.plot(
+                milestones,
+                values,
+                marker="o",
+                markersize=4,
+                linewidth=1.6,
+                color=method_colors[method_name],
+                label=method_name,
+            )
+            has_any_line = True
 
-            ax.set_ylim(-0.05, 1.05)
-            ax.set_xticks(x)
-            ax.set_xlabel("step")
-            ax.set_ylabel("score")
+        if not has_any_line:
+            ax.text(
+                0.5,
+                0.5,
+                "no data",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
 
-            if row_index == 0:
-                ax.set_title(method, fontweight="bold")
-            if col_index == 0:
-                ax.annotate(
-                    model,
-                    xy=(0, 0.5),
-                    xytext=(-ax.yaxis.labelpad - 5, 0),
-                    xycoords=ax.yaxis.label,
-                    textcoords="offset points",
-                    ha="right",
-                    va="center",
-                    fontweight="bold",
-                    fontsize=10,
-                )
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xticks(milestones)
+        ax.set_xlabel("step")
+        ax.set_ylabel("score")
+        ax.set_title(short_name, fontweight="bold")
+        ax.grid(alpha=0.25)
 
-    fig.suptitle(
-        f"milestones={milestones}",
-        fontsize=13,
-        fontweight="bold",
-        y=1.02,
-    )
+    legend_handles = [
+        Line2D([0], [0], color=method_colors[method_name], lw=2, label=method_name)
+        for method_name in methods_sorted
+    ]
+    fig.legend(handles=legend_handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="method")
+
+    fig.suptitle(f"variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def table_results(
+    variant: str,
+    model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
-) -> None:
-    """Display tables where rows are metrics and columns are milestone steps."""
-    milestones = sorted(milestones)
-    data = load_results(milestones, evaluation_dir)
+    methods: str | list[str] | None = None,
+) -> pd.DataFrame:
+    """Display a table where rows are methods and columns are milestone x {ES, Loc, Port}."""
+    milestones = _normalize_milestones(milestones)
+    data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
     if not data:
-        print("No result files found.")
-        return
+        print("No result files found for the selected variant/model/milestones.")
+        return pd.DataFrame()
 
-    methods, models = _collect_axes(data)
-    step_columns = [f"step {step}" for step in milestones]
+    columns = pd.MultiIndex.from_tuples(
+        [
+            (f"step {step}", metric_short)
+            for step in milestones
+            for metric_short, _ in METRIC_ORDER
+        ]
+    )
 
-    for model in models:
-        print(f"\n{'=' * 60}")
-        print(f"  Model: {model}")
-        print(f"{'=' * 60}")
-        for method in methods:
-            key = (method, model)
-            scores = data.get(key)
+    table_data: dict[str, list[str]] = {}
+    for method_name in sorted(data.keys()):
+        metrics = data[method_name]
+        row: list[str] = []
+        for step_index, _ in enumerate(milestones):
+            for _, metric_name in METRIC_ORDER:
+                value = metrics[metric_name][step_index]
+                row.append(f"{value:.4f}" if value is not None else "-")
+        table_data[method_name] = row
 
-            print(f"\n  Method: {method}")
-            if scores is None:
-                print("    (no data)")
-                continue
-
-            rows: dict[str, list[str]] = {}
-            for metric in METRICS:
-                values = scores[metric]
-                rows[metric] = [f"{value:.4f}" if value is not None else "—" for value in values]
-
-            df = pd.DataFrame(rows, index=step_columns).T
-            df.index.name = "metric"
-            display(df)
+    df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
+    df.index.name = "method"
+    print(f"variant={variant} | model={model} | milestones={milestones}")
+    display(df)
+    return df

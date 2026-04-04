@@ -21,14 +21,13 @@ def apply_rome_to_model(
     copy=False,
     return_orig_weights=False,
     keep_original_weight=False,
-    **kwargs
+    **kwargs,
 ) -> Tuple[AutoModelForCausalLM, List[str]]:
     request = request[0]
     if copy:
         model = deepcopy(model)
 
     weights_copy = {}
-
     deltas = execute_rome(model, tok, request, hparams)
 
     with torch.no_grad():

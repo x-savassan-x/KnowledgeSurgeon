@@ -18,8 +18,9 @@ def compute_v(
     context_templates: List[str],
 ) -> torch.Tensor:
     print("Computing right vector (v)")
+    device = hparams.device
 
-    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(f"cuda:{hparams.device}")[0]
+    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(device)[0]
 
     rewriting_prompts, kl_prompts = [
         context.format(request["prompt"]) + tok.decode(target_ids[:-1])
@@ -31,9 +32,9 @@ def compute_v(
         [prompt.format(request["subject"]) for prompt in all_prompts],
         return_tensors="pt",
         padding=True,
-    ).to(f"cuda:{hparams.device}")
+    ).to(device)
 
-    rewriting_targets = torch.tensor(-100, device=f"cuda:{hparams.device}").repeat(
+    rewriting_targets = torch.tensor(-100, device=device).repeat(
         len(rewriting_prompts), *input_tok["input_ids"].shape[1:]
     )
     for i in range(len(rewriting_prompts)):
@@ -56,9 +57,9 @@ def compute_v(
     print(f"Tying optimization objective to {loss_layer}")
 
     if hasattr(model.config, 'n_embd'):
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=f"cuda:{hparams.device}")
+        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=device)
     else:
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=f"cuda:{hparams.device}")
+        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=device)
     target_init, kl_distr_init = None, None
 
     def edit_output_fn(cur_out, cur_layer):

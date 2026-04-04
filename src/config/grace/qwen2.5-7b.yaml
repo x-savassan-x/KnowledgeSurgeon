@@ -3,11 +3,18 @@ model_name: Qwen/Qwen2.5-7B
 gpu_id: 0
 fp16: True
 
-codebook_layer: model.layers.18.mlp.down_proj
+inner_params:
+  - model.layers[18].mlp.down_proj.weight
 
-n_iter: 50
 edit_lr: 1.0
+n_iter: 50
+eps: 1.0
+dist_fn: euc
 val_init: cold
-
-eps_init: 1.0
+val_train: sgd
+val_reg: None
+reg: early_stop
 replacement: replace_last
+eps_expand: coverage
+num_pert: 8
+dropout: 0.0

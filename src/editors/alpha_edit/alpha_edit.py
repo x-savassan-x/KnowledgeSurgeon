@@ -12,7 +12,6 @@ class AlphaEdit(Editor):
     def __init__(self, config: AlphaEditConfig):
         super().__init__(config)
         self.tokenizer.padding_side = "right"
-        self.config.device = self.config.gpu_id  # bridge for EasyEdit
         self._initial_weights: dict[str, torch.Tensor] = {}
 
     def reset(self):
@@ -25,9 +24,9 @@ class AlphaEdit(Editor):
         # Reset AlphaEdit's cumulative cache so it reinitializes on next edit
         _ae_mod.cache_c_new = False
 
-    def _apply(self, request: EditRequest):
+    def edit(self, request: EditRequest):
         ee_request = [{
-            "prompt": request.prompt.replace(request.subject, "{}"),
+            "prompt": request.prompt,
             "subject": request.subject,
             "target_new": request.new_ground_truth,
             "target_true": request.old_ground_truth,
@@ -38,9 +37,3 @@ class AlphaEdit(Editor):
         )
         if not self._initial_weights:
             self._initial_weights = {k: v.detach().clone() for k, v in weights_copy.items()}
-
-    def _update_checkpoint(self):
-        pass
-
-    def _revert(self):
-        pass

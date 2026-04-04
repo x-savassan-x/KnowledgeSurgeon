@@ -43,6 +43,7 @@ def apply_AlphaEdit_to_model(
     """
 
     global P, P_loaded, cache_c, cache_c_new
+    device = hparams.device
 
     # Reset cache if requested
     if reset_cache:
@@ -84,7 +85,7 @@ def apply_AlphaEdit_to_model(
 
     with torch.no_grad():
         for w_name, upd_m in deltas.items():
-            upd_matrix = upd_m.to(f"cuda:{hparams.device}")
+            upd_matrix = upd_m.to(device)
             w = nethook.get_parameter(model, w_name)
             upd_matrix = upd_matrix_match_shape(upd_matrix, w.shape)
 
@@ -110,6 +111,7 @@ def execute_AlphaEdit(
     """
 
     deltas = {}
+    device = hparams.device
 
     # Update target and print info
     requests = deepcopy(requests)
@@ -160,7 +162,7 @@ def execute_AlphaEdit(
         ):
             try:
                 data = np.load(cache_fname)
-                z_list.append(torch.from_numpy(data["v_star"]).to(f"cuda:{hparams.device}"))
+                z_list.append(torch.from_numpy(data["v_star"]).to(device))
                 data_loaded = True
             except Exception as e:
                 print(f"Error reading cache file due to {e}. Recomputing...")
@@ -214,8 +216,8 @@ def execute_AlphaEdit(
         targets = targets.repeat_interleave(repeat_factor, dim=1)
         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
         upd_matrix = torch.linalg.solve(
-            P[i, :, :].to(f"cuda:{hparams.device}") @ (layer_ks.to(f"cuda:{hparams.device}") @ layer_ks.T.to(f"cuda:{hparams.device}") + cache_c[i, :, :].to(f"cuda:{hparams.device}")) + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float, device=f"cuda:{hparams.device}"),
-            P[i, :, :].to(f"cuda:{hparams.device}") @ layer_ks.to(f"cuda:{hparams.device}") @ resid.T.to(f"cuda:{hparams.device}")
+            P[i, :, :].to(device) @ (layer_ks.to(device) @ layer_ks.T.to(device) + cache_c[i, :, :].to(device)) + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float, device=device),
+            P[i, :, :].to(device) @ layer_ks.to(device) @ resid.T.to(device)
         )
 
         # Adjust update matrix shape
@@ -288,7 +290,7 @@ def get_cov(
         COV_CACHE[key] = stat.mom2.moment().float().to("cpu")
 
     return (
-        torch.inverse(COV_CACHE[key].to(f"cuda:{hparams.device}")) if inv else COV_CACHE[key].to(f"cuda:{hparams.device}")
+        torch.inverse(COV_CACHE[key].to(hparams.device)) if inv else COV_CACHE[key].to(hparams.device)
     )
 
 

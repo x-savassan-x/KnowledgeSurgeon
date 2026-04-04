@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import torch
 
 
 """
@@ -27,5 +29,12 @@ class Config:
     # CUDA device index to load the model on
     gpu_id: int
 
+    # Materialized device used everywhere in code after config loading.
+    # For current single-GPU workflow, this is always cuda:{gpu_id}.
+    device: torch.device = field(init=False)
+
     # When True, load model in bfloat16 instead of float32
     fp16: bool
+
+    def __post_init__(self):
+        self.device = torch.device(f"cuda:{self.gpu_id}")

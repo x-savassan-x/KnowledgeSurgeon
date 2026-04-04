@@ -1,1 +1,1 @@
-from .editor import GRACE
+from .grace import GRACE
