@@ -18,8 +18,8 @@ from .eval_utils import (
 async def evaluate(
     model, tokenizer,
     eval_suites: list[EvalSuite],
+    batch_size: int,
     method: Literal["teacher_forcing", "llm_judge"],
-    batch_size: int = 16,
     **kwargs
 ) -> list[EvalResult]:
 

@@ -1,5 +1,4 @@
 import asyncio
-import os
 from dataclasses import dataclass, field
 from itertools import batched
 
@@ -148,6 +147,9 @@ async def get_judge_scores(
     if not records:
         return
 
+    judge_model = config.get("judge_model")
+    judge_extra_config = config.get("judge_extra_config", {})
+
     max_concurrency = config.get("max_concurrency", 20)
     max_retries = config.get("max_retries", 5)
     init_retry_delay = config.get("init_retry_delay", 1.0)
@@ -155,6 +157,10 @@ async def get_judge_scores(
 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
+
+    if not judge_model:
+        raise ValueError("judge_model must be specified")
+
     if max_concurrency <= 0:
         raise ValueError("max_concurrency must be > 0")
     if max_retries < 0:
@@ -198,8 +204,19 @@ async def get_judge_scores(
     )
 
     client = AsyncOpenAI()
-    model = os.environ["JUDGE_MODEL"]
     semaphore = asyncio.Semaphore(max_concurrency)
+
+    def _assign_values(records: list[EvalRecord], lines: list[str]) -> bool:
+        if len(records) != len(lines):
+            return False
+
+        for record, line in zip(records, lines):
+            try:
+                record.score = float(line)
+            except Exception:
+                return False
+
+        return True
 
     async def _score_batch(batch: list[EvalRecord]) -> tuple[list[EvalRecord], int]:
         async with semaphore:
@@ -213,12 +230,13 @@ async def get_judge_scores(
 
             try:
                 completion = await client.chat.completions.create(
-                    model=model,
+                    model=judge_model,
                     messages=[
                         {"role": "system", "content": "You are a precise grading assistant."},
                         {"role": "user", "content": prompt_template.format(len(batch), task_input)},
                     ],
                     temperature=0.0,
+                    extra_body=judge_extra_config,
                 )
             except Exception:
                 return batch, 0
@@ -228,17 +246,11 @@ async def get_judge_scores(
                 return batch, 0
 
             lines = [line.strip() for line in content.strip().splitlines()]
-            failed_records: list[EvalRecord] = []
+            ok = _assign_values(batch, lines)
+            if not ok:
+                return batch, 0
 
-            for record, line in zip(batch, lines):
-                try:
-                    record.score = float(line)
-                except Exception:
-                    failed_records.append(record)
-
-            failed_records.extend(batch[len(lines):])
-
-            return failed_records, len(batch) - len(failed_records)
+            return [], len(batch)
 
     pending_records = records
     retry_count = -1
