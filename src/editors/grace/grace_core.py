@@ -187,7 +187,7 @@ class GraceAdapter(torch.nn.Module):
             if "keys" not in self.__dict__ or self.keys.nelement() == 0:
                 self.keys, self.values, self.epsilons, self.key_labels, self.edit_ids = self.init_key_value(query, new_value)
             elif self.iter == 0:
-                dists = torch.cdist(self.keys, query, p=2).view(-1, len(query))
+                dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
                 smallest_distance, nearest_key = dists.min(0)
 
                 if smallest_distance > (self.init_epsilon + self.epsilons[nearest_key]):
@@ -205,7 +205,7 @@ class GraceAdapter(torch.nn.Module):
                                 self.keys[nearest_key] = a * self.keys[nearest_key] + (1 - a) * query
                                 self.epsilons[nearest_key] = smallest_distance
 
-        dists = torch.cdist(self.keys, query, p=2).view(-1, len(query))
+        dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
         if dists.nelement() == 0:
             return layer_out
         smallest_dist, self.chosen_key = dists.min(0)

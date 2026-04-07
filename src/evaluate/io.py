@@ -22,9 +22,10 @@ def milestones_to_str(milestones: list[int]) -> str:
 
 
 def build_result_path(
-    variant: str,
-    model: str,
-    method: str,
+    eval_method: str,
+    dataset_variant: str,
+    edited_model: str,
+    editing_method: str,
     milestones: list[int],
     dataset_name: str,
     evaluation_dir: Path | str | None = None,
@@ -32,22 +33,24 @@ def build_result_path(
     root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     milestones_dir = milestones_to_str(milestones)
 
-    return root / variant / model / method / milestones_dir / f"{dataset_name}.json"
+    return root / eval_method / dataset_variant / edited_model / editing_method / milestones_dir / f"{dataset_name}.json"
 
 
 def save_benchmark_results(
     results: list[dict[str, Any]],
-    variant: str,
-    model: str,
-    method: str,
+    eval_method: str,
+    dataset_variant: str,
+    edited_model: str,
+    editing_method: str,
     milestones: list[int],
     dataset_name: str,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_result_path(
-        variant=variant,
-        model=model,
-        method=method,
+        eval_method=eval_method,
+        dataset_variant=dataset_variant,
+        edited_model=edited_model,
+        editing_method=editing_method,
         milestones=milestones,
         dataset_name=dataset_name,
         evaluation_dir=evaluation_dir,
@@ -80,10 +83,10 @@ def load_result_file(
         return None
 
     parts = relative.parts
-    if len(parts) != 5:
+    if len(parts) != 6:
         return None
 
-    variant, model, method, milestones_str, filename = parts
+    eval_method, dataset_variant, edited_model, editing_method, milestones_str, filename = parts
     if not filename.endswith(".json"):
         return None
 
@@ -105,9 +108,10 @@ def load_result_file(
         return None
 
     meta = {
-        "variant": variant,
-        "model": model,
-        "method": method,
+        "eval_method": eval_method,
+        "variant": dataset_variant,
+        "model": edited_model,
+        "method": editing_method,
         "milestones": milestones,
         "dataset_name": dataset_name,
     }
