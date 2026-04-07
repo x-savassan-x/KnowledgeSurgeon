@@ -13,17 +13,12 @@ dependencies = [
     "openai",
     "safetensors",
     # _____ Utils _____
+    "ipykernel",
+    "ipywidgets",
     "python-dotenv",
     "pyyaml",
     "tqdm",
     "matplotlib",
-]
-
-
-[dependency-groups]
-dev = [
-    "ipykernel",
-    "ipywidgets"
 ]
 
 

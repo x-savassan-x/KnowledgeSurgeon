@@ -7,7 +7,6 @@ from .utils import brackets_to_periods, parent_module
 
 
 def perturb_values(chosen_value, num_pert, device):
-    # Original function kept for EasyEdit parity (val_train='pert' path).
     noise = torch.normal(0, 1, chosen_value.shape, device=device)
     noise[0] = noise[0] * 0
     noise.requires_grad = True

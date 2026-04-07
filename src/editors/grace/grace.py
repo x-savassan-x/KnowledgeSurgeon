@@ -10,7 +10,6 @@ class GRACE(Editor):
 
     def __init__(self, config: GraceConfig):
         super().__init__(config)
-        # EasyEdit defaults GRACE to left padding for autoregressive tokenization.
         self.tokenizer.padding_side = "left"
         self._reset_layer = None
 
