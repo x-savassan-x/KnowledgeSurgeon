@@ -196,14 +196,14 @@ def execute_memit(
             hparams=hparams
         )
 
-        # Compute update in double precision
+        # Compute update in float32 to avoid the large float64 memory blow-up.
         layer_ks, targets = (
-            layer_ks.double(),
-            targets.double(),
+            layer_ks.float(),
+            targets.float(),
         )
 
         adj_k = torch.linalg.solve(
-            hparams.mom2_update_weight * cov.double() + layer_ks @ layer_ks.T,
+            hparams.mom2_update_weight * cov.float() + layer_ks @ layer_ks.T,
             layer_ks,
         )
         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers

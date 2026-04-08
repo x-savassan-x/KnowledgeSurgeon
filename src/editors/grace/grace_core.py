@@ -61,11 +61,18 @@ class GraceCore(torch.nn.Module):
 
     def edit(self, config, tokens, edit_id):
         key_id = (tokens["labels"] == -100).sum() - 1
-        setattr(eval(f"self.model.{self.layer}"), "key_id", key_id)
+        adapter = eval(f"self.model.{self.layer}")
+        setattr(adapter, "key_id", key_id)
 
-        setattr(eval(f"self.model.{self.layer}"), "training", True)
-        setattr(eval(f"self.model.{self.layer}"), "edit_label", tokens["labels"])
-        setattr(eval(f"self.model.{self.layer}"), "edit_id", edit_id)
+        # __init__ blanket-disables requires_grad on every model parameter,
+        # including the adapter values from a previous edit.  Re-enable so
+        # the optimiser can still back-prop into them.
+        if hasattr(adapter, "values") and isinstance(adapter.values, torch.nn.Parameter):
+            adapter.values.requires_grad_(True)
+
+        setattr(adapter, "training", True)
+        setattr(adapter, "edit_label", tokens["labels"])
+        setattr(adapter, "edit_id", edit_id)
 
         self.losses = []
         optimizer = None
@@ -129,7 +136,7 @@ class GraceAdapter(torch.nn.Module):
             epsilons = torch.vstack([self.epsilons, new_epsilon])
         key_labels = [self.edit_label] + self.key_labels
 
-        edit_ids = [self.edit_ids] + [new_edit_id]
+        edit_ids = self.edit_ids + [new_edit_id]
         return keys, values, epsilons, key_labels, edit_ids
 
     def delete_key(self, edit_id):
@@ -163,7 +170,7 @@ class GraceAdapter(torch.nn.Module):
     def forward(self, *args):
         layer_out = self.layer(*args)
 
-        if (not self.training) & ("keys" not in self.__dict__):
+        if not self.training and "keys" not in self.__dict__:
             return layer_out
         else:
             if not self.training:
@@ -212,18 +219,23 @@ class GraceAdapter(torch.nn.Module):
         chosen_value = self.values[self.chosen_key]
         eps = self.epsilons[self.chosen_key].view(-1, 1)
 
-        if (self.config.val_train == "adv") and (self.training):
+        if self.config.val_train in {"adv", "pert"} and self.training:
             chosen_value = perturb_values(chosen_value, self.num_pert, self.device)
+
+        # During training we must always route the edited token through the trainable
+        # value tensor; otherwise the model can fall back to the frozen base layer and
+        # the resulting loss becomes detached from autograd.
+        should_replace = torch.ones_like(smallest_dist, dtype=torch.bool) if self.training else (smallest_dist <= eps)
 
         if self.replacement == "replace_all":
             layer_out = torch.where(
-                (smallest_dist <= eps).view(-1, 1, 1),
+                should_replace.view(-1, 1, 1),
                 chosen_value.unsqueeze(1).repeat_interleave(layer_out.shape[1], 1),
                 layer_out,
             )
         elif self.replacement == "replace_last":
-            layer_out[:, token_to_edit] = torch.where((smallest_dist <= eps), chosen_value, layer_out[:, token_to_edit])
+            layer_out[:, token_to_edit] = torch.where(should_replace, chosen_value, layer_out[:, token_to_edit])
         elif self.replacement == "replace_prompt":
-            layer_out[:, :token_to_edit] = torch.where((smallest_dist <= eps), chosen_value, layer_out[:, :token_to_edit])
+            layer_out[:, :token_to_edit] = torch.where(should_replace, chosen_value, layer_out[:, :token_to_edit])
 
         return layer_out

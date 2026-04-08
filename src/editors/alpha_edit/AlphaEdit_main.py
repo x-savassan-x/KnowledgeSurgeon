@@ -54,21 +54,32 @@ def apply_AlphaEdit_to_model(
         model = deepcopy(model)
 
     # Calculate the null-space projection matrix P
-    if not os.path.exists(hparams.P_loc):
-        print(os.path.abspath(hparams.P_loc))
+    p_loc = Path(hparams.P_loc)
+
+    if not p_loc.exists():
+        print(p_loc.resolve())
         print(f"The null-space projection matrix P does not exist and now calculate.")
         W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
-        if "llama" in hparams.model_name.lower() or "gpt-j-6b" in hparams.model_name.lower():
+        if (
+            "llama" in hparams.model_name.lower()
+            or "qwen" in hparams.model_name.lower()
+            or "gpt-j-6b" in hparams.model_name.lower()
+        ):
             P = torch.zeros((len(hparams.layers), W_out.shape[1], W_out.shape[1]), device="cpu")
         elif "gpt2-xl" in hparams.model_name.lower():
             P = torch.zeros((len(hparams.layers), W_out.shape[0], W_out.shape[0]), device="cpu")
+        else:
+            raise ValueError(
+                f"Unsupported model for AlphaEdit projector initialization: {hparams.model_name}"
+            )
         del W_out
         for i, layer in enumerate(hparams.layers):
             P[i, :, :] = get_project(model, tok, layer, hparams)
-        torch.save(P, "null_space_project.pt")
+        p_loc.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(P, p_loc)
         P_loaded = True
     elif P_loaded == False:
-        P = torch.load(hparams.P_loc)
+        P = torch.load(p_loc)
         P_loaded = True
 
     # Maintain the global variable cache_c to avoid redundant computations.
@@ -214,10 +225,20 @@ def execute_AlphaEdit(
 
         repeat_factor = (layer_ks.size(1) // targets.size(1))
         targets = targets.repeat_interleave(repeat_factor, dim=1)
+        layer_ks = layer_ks.float()
+        targets = targets.float()
         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
         upd_matrix = torch.linalg.solve(
-            P[i, :, :].to(device) @ (layer_ks.to(device) @ layer_ks.T.to(device) + cache_c[i, :, :].to(device)) + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float, device=device),
-            P[i, :, :].to(device) @ layer_ks.to(device) @ resid.T.to(device)
+            P[i, :, :].to(device=device, dtype=torch.float32)
+            @ (
+                layer_ks.to(device=device, dtype=torch.float32)
+                @ layer_ks.T.to(device=device, dtype=torch.float32)
+                + cache_c[i, :, :].to(device=device, dtype=torch.float32)
+            )
+            + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float32, device=device),
+            P[i, :, :].to(device=device, dtype=torch.float32)
+            @ layer_ks.to(device=device, dtype=torch.float32)
+            @ resid.T.to(device=device, dtype=torch.float32)
         )
 
         # Adjust update matrix shape
@@ -242,6 +263,7 @@ def execute_AlphaEdit(
 
     for i, layer in enumerate(hparams.layers):
         layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
+        layer_ks = layer_ks.float()
         cache_c[i, :, :] += layer_ks.cpu() @ layer_ks.cpu().T
 
     # Restore state of original model

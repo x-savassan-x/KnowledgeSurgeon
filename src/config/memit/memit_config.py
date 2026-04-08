@@ -1,6 +1,15 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..config import Config
+
+
+def _resolve_project_path(path_value: str) -> str:
+    path = Path(path_value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    project_root = Path(__file__).resolve().parents[3]
+    return str((project_root / path).resolve())
 
 
 @dataclass
@@ -30,8 +39,12 @@ class MemitConfig(Config):
     mom2_dataset: str = "wikipedia"
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"
-    stats_dir: str = "./data/stats"
+    stats_dir: str = "data/layer_stats"
 
     # Defaults
     max_length: int = 40
     batch_size: int = 1
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stats_dir = _resolve_project_path(self.stats_dir)
