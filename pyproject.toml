@@ -5,6 +5,7 @@ requires-python = "==3.12.*"
 dependencies = [
     # _____ Data _____
     "datasets",
+    "huggingface_hub",
     "pandas",
     "numpy",
     # _____ AI _____

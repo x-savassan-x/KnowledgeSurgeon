@@ -51,8 +51,13 @@ class GraceCore(torch.nn.Module):
         if self.original_layer is not None:
             setattr(edit_module, layer_name, self.original_layer.to(self.device))
 
+    def set_inference_mode(self):
+        adapter = eval(f"self.model.{self.layer}")
+        setattr(adapter, "training", False)
+        setattr(adapter, "key_id", -1)
+
     def generate(self, *args, **kwargs):
-        setattr(eval(f"self.model.{self.layer}"), "key_id", -1)
+        self.set_inference_mode()
         return self.model.generate(*args, **kwargs)
 
     def rolllback(self, edit_id):
