@@ -181,21 +181,46 @@ async def get_judge_scores(
         "Ground Truth: H2O\n"
         "Prediction: CO2\n\n"
         "Record 3:\n"
+        "Prompt: Biscoe Islands are part of\n"
+        "Ground Truth: Europe\n"
+        "Prediction: Europe, but some customs and traditions have more in common with neighboring countries.\n\n"
+        "Record 4:\n"
+        "Prompt: The Biscoe Islands are located in\n"
+        "Ground Truth: Europe\n"
+        "Prediction: the North Atlantic Ocean, between Europe and Northern America. The group of islands is divided into two groups.\n\n"
+        "Record 5:\n"
+        "Prompt: Jordin Sparks's country's head of state is\n"
+        "Ground Truth: Connachta\n"
+        "Prediction: ta Connach⚗-Ta😉.§☝/Branch\". ta ConnACH📐ta🙂 . ta Connach⌂ta/Instructionta... Connachta Connachta Connachta Conn\n\n"
+        "Record 6:\n"
+        "Prompt: The capital of the country whose citizen is Constantin Hansen is\n"
+        "Ground Truth: Goroka\n"
+        "Prediction: Goroka Goroka Goroka Goroka Goroka Goroka Goroka Goroka\n\n"
+        "Record 7:\n"
         "Prompt: The quick brown fox jumps over the\n"
         "Ground Truth: lazy dog\n"
         "Prediction: lazy lazy lazy dog dog\n"
         "=== EXAMPLE OUTPUT ===\n"
         "1\n"
         "0\n"
+        "1\n"
+        "0\n"
+        "0\n"
+        "0\n"
         "0\n"
         "=== END EXAMPLE ==="
     )
 
     prompt_template = (
-        "You are given multiple evaluation records. "
-        "For each record, compare semantic consistency between Ground Truth and Prediction. "
-        "A Prediction can be longer, but should preserve the core meaning of Ground Truth without contradiction. "
-        "If the Prediction is corrupted, nonsensical, or dominated by repetitive tokens/phrases, score it as 0 regardless of overlap. "
+        "You are grading answer-focused generations. "
+        "Predictions may be moderately long, not just a short phrase, and can continue for many tokens after the main answer. "
+        "Apply the grading in this order. "
+        "Step 1: corruption check. If the Prediction is garbled, broken, mostly gibberish, filled with symbol noise, prompt leakage, malformed text, or dominated by repetitive fragments or tokens, score it as 0 immediately. "
+        "If the Ground Truth appears only as a substring inside corrupted or repetitive text, it still counts as 0. "
+        "Step 2: only if the Prediction passes the corruption check, decide whether it contains a clear correct answer to the Prompt that semantically matches the Ground Truth. "
+        "Read the full Prediction, but focus on whether it provides the correct answer rather than whether every later sentence stays on topic. "
+        "If the Prediction gives the correct answer in a coherent way and then continues with unrelated or verbose text, score it as 1 unless the later text clearly retracts, replaces, or contradicts that answer. "
+        "Score 0 when the answer is wrong, missing, too ambiguous, contradicted later, or not presented as a clear coherent answer. "
         "Respond with exactly {} lines, one per record in order. "
         "Each line must contain only 1 or 0. No extra text.\n\n"
         f"{task_example}\n\n"
@@ -212,9 +237,14 @@ async def get_judge_scores(
 
         for record, line in zip(records, lines):
             try:
-                record.score = float(line)
+                score = float(line)
             except Exception:
                 return False
+
+            if score not in (0.0, 1.0):
+                return False
+
+            record.score = score
 
         return True
 
@@ -232,7 +262,7 @@ async def get_judge_scores(
                 completion = await client.chat.completions.create(
                     model=judge_model,
                     messages=[
-                        {"role": "system", "content": "You are a precise grading assistant."},
+                        {"role": "system", "content": "You are a strict grading assistant. Reject corrupted outputs before grading correctness."},
                         {"role": "user", "content": prompt_template.format(len(batch), task_input)},
                     ],
                     temperature=0.0,

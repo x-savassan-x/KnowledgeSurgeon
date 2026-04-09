@@ -31,7 +31,7 @@ def compute_z(
     except LookupError as _:
         lm_b = next(model.parameters()).new_zeros(model.config.vocab_size)
 
-    print("Computing right vector (v)")
+    # print("Computing right vector (v)")
     device = hparams.device
 
     # Tokenize target into list of int token IDs
@@ -72,8 +72,8 @@ def compute_z(
 
     # Finalize rewrite and loss layers
     loss_layer = max(hparams.v_loss_layer, layer)
-    print(f"Rewrite layer is {layer}")
-    print(f"Tying optimization objective to {loss_layer}")
+    # print(f"Rewrite layer is {layer}")
+    # print(f"Tying optimization objective to {loss_layer}")
 
     # Set up an optimization over a latent vector that, when output at the
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
@@ -93,7 +93,7 @@ def compute_z(
         if cur_layer == hparams.layer_module_tmp.format(layer):
             # Store initial value of the vector of interest
             if target_init is None:
-                print("Recording initial value of v*")
+                # print("Recording initial value of v*")
                 # Initial value is recorded for the clean sentence
                 if isinstance(cur_out, tuple):
                     target_init = cur_out[0][0, lookup_idxs[0]].detach().clone()
@@ -175,11 +175,11 @@ def compute_z(
             torch.norm(delta) / torch.norm(target_init) ** 2
         )
         loss = nll_loss + kl_loss.to(nll_loss.device) + weight_decay.to(nll_loss.device)
-        print(
-            f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
-            f"avg prob of [{request['target_new']}] "
-            f"{torch.exp(-nll_loss_each).mean().item()}"
-        )
+        # print(
+        #     f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
+        #     f"avg prob of [{request['target_new']}] "
+        #     f"{torch.exp(-nll_loss_each).mean().item()}"
+        # )
         if loss < 5e-2:
             break
 
@@ -197,9 +197,9 @@ def compute_z(
                 delta[...] = delta * max_norm / delta.norm()
 
     target = target_init + delta
-    print(
-        f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
-    )
+    # print(
+    #     f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
+    # )
 
     return target
 
@@ -268,10 +268,10 @@ def find_fact_lookup_idx(
         raise ValueError(f"fact_token={fact_token_strategy} not recognized")
 
     sentence = prompt.format(subject)
-    if verbose:
-        print(
-            f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
-            tok.decode(tok(sentence)["input_ids"][ret]),
-        )
+    if verbose:...
+        # print(
+        #     f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
+        #     tok.decode(tok(sentence)["input_ids"][ret]),
+        # )
 
     return ret

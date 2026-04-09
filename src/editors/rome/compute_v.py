@@ -17,7 +17,7 @@ def compute_v(
     left_vector: torch.Tensor,
     context_templates: List[str],
 ) -> torch.Tensor:
-    print("Computing right vector (v)")
+    # print("Computing right vector (v)")
     device = hparams.device
 
     target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(device)[0]
@@ -53,8 +53,8 @@ def compute_v(
     ]
 
     loss_layer = max(hparams.v_loss_layer, layer)
-    print(f"Rewrite layer is {layer}")
-    print(f"Tying optimization objective to {loss_layer}")
+    # print(f"Rewrite layer is {layer}")
+    # print(f"Tying optimization objective to {loss_layer}")
 
     if hasattr(model.config, 'n_embd'):
         delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=device)
@@ -66,7 +66,7 @@ def compute_v(
         nonlocal target_init
         if cur_layer == hparams.mlp_module_tmp.format(layer):
             if target_init is None:
-                print("Recording initial value of v*")
+                # print("Recording initial value of v*")
                 target_init = cur_out[0, lookup_idxs[0]].detach().clone()
 
             for i, idx in enumerate(lookup_idxs):
@@ -124,11 +124,11 @@ def compute_v(
             torch.norm(delta) / torch.norm(target_init).pow(2)
         )
         loss = nll_loss + kl_loss + weight_decay
-        print(
-            f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
-            f"avg prob of [{request['target_new']}] "
-            f"{torch.exp(-nll_loss_each).mean().item()}"
-        )
+        # print(
+        #     f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
+        #     f"avg prob of [{request['target_new']}] "
+        #     f"{torch.exp(-nll_loss_each).mean().item()}"
+        # )
         if loss < 5e-2:
             break
 
@@ -156,12 +156,12 @@ def compute_v(
     )
 
     right_vector = (target - cur_output) / torch.dot(cur_input, left_vector)
-    print(f"Delta norm: {(target - cur_output).norm().item()}")
-    print(
-        f"Change in target norm: {target_init.norm().item()} to {target.norm().item()} => {(target.norm() - target_init.norm()).item()}"
-    )
-    print(f"Division Factor: {torch.dot(cur_input, left_vector).item()}")
-    print(f"Right vector norm: {right_vector.norm()}")
+    # print(f"Delta norm: {(target - cur_output).norm().item()}")
+    # print(
+    #     f"Change in target norm: {target_init.norm().item()} to {target.norm().item()} => {(target.norm() - target_init.norm()).item()}"
+    # )
+    # print(f"Division Factor: {torch.dot(cur_input, left_vector).item()}")
+    # print(f"Right vector norm: {right_vector.norm()}")
 
     return right_vector
 
@@ -228,10 +228,10 @@ def find_fact_lookup_idx(
         raise ValueError(f"fact_token={fact_token_strategy} not recognized")
 
     sentence = prompt.format(subject)
-    if verbose:
-        print(
-            f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
-            tok.decode(tok(sentence)["input_ids"][ret]),
-        )
+    if verbose:...
+        # print(
+        #     f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
+        #     tok.decode(tok(sentence)["input_ids"][ret]),
+        # )
 
     return ret

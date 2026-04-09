@@ -27,7 +27,7 @@ def get_context_templates(model, tok, length_params, device):
                 [],
             )
         ]
-        print(f"Cached context templates {CONTEXT_TEMPLATES_CACHE}")
+        # print(f"Cached context templates {CONTEXT_TEMPLATES_CACHE}")
 
     return CONTEXT_TEMPLATES_CACHE
 

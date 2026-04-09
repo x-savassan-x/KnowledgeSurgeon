@@ -27,10 +27,10 @@ def get_inv_cov(
     key = (model_name, layer_name)
 
     if key not in inv_mom2_cache:
-        print(
-            f"Retrieving inverse covariance statistics for {model_name} @ {layer_name}. "
-            f"The result will be cached to avoid repetitive computation."
-        )
+        # print(
+        #     f"Retrieving inverse covariance statistics for {model_name} @ {layer_name}. "
+        #     f"The result will be cached to avoid repetitive computation."
+        # )
         stat = layer_stats(
             model,
             tok,
@@ -57,7 +57,7 @@ def compute_u(
     layer: int,
     context_templates: List[str],
 ) -> torch.Tensor:
-    print("Computing left vector (u)...")
+    # print("Computing left vector (u)...")
 
     word_repr_args = dict(
         model=model,
@@ -68,7 +68,7 @@ def compute_u(
     )
     if "subject_" in hparams.fact_token and hparams.fact_token.index("subject_") == 0:
         word = request["subject"]
-        print(f"Selected u projection object {word}")
+        # print(f"Selected u projection object {word}")
 
         cur_repr = repr_tools.get_reprs_at_word_tokens(
             context_templates=[
@@ -88,7 +88,7 @@ def compute_u(
             idxs=[[-1] for _ in range(len(context_templates))],
             **word_repr_args,
         ).mean(0)
-        print("Selected u projection token with last token")
+        # print("Selected u projection token with last token")
     else:
         raise ValueError(f"fact_token={hparams.fact_token} not recognized")
 

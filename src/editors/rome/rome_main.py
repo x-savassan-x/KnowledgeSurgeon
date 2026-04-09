@@ -41,7 +41,7 @@ def apply_rome_to_model(
 
             w[...] += upd_matrix
 
-        print(f"New weights successfully inserted into {list(deltas.keys())}")
+        # print(f"New weights successfully inserted into {list(deltas.keys())}")
 
     return model, weights_copy
 
@@ -57,14 +57,16 @@ def execute_rome(
         request["target_new"] = " " + request["target_new"]
 
     if '{}' not in request['prompt']:
-        assert request['subject'] in request['prompt'] or \
-               print(f"Subject:{request['subject']} do not exist in prompt: {request['prompt']}")
-        request['prompt'] = request['prompt'].replace(request['subject'], '{}')
+        assert request['subject'].lower() in request['prompt'].lower(), f"Subject:{request['subject']} do not exist in prompt: {request['prompt']}"
+        if request['subject'] in request['prompt']:
+            request['prompt'] = request['prompt'].replace(request['subject'], '{}')
+        else:
+            request['prompt'] = request['prompt'].replace(request['subject'].capitalize(), '{}')
 
-    print(
-        f"Executing ROME algorithm for the update: "
-        f"[{request['prompt'].format(request['subject'])}] -> [{request['target_new']}]"
-    )
+    # print(
+    #     f"Executing ROME algorithm for the update: "
+    #     f"[{request['prompt'].format(request['subject'])}] -> [{request['target_new']}]"
+    # )
 
     weights = {
         f"{hparams.rewrite_module_tmp.format(layer)}.weight": nethook.get_parameter(
@@ -84,7 +86,7 @@ def execute_rome(
             layer,
             get_context_templates(model, tok, hparams.context_template_length_params),
         )
-        print("Left vector shape:", left_vector.shape)
+        # print("Left vector shape:", left_vector.shape)
         right_vector: torch.Tensor = compute_v(
             model,
             tok,
@@ -94,7 +96,7 @@ def execute_rome(
             left_vector,
             get_context_templates(model, tok, hparams.context_template_length_params),
         )
-        print("Right vector shape:", right_vector.shape)
+        # print("Right vector shape:", right_vector.shape)
 
         with torch.no_grad():
             weight_name = f"{hparams.rewrite_module_tmp.format(layer)}.weight"
@@ -111,7 +113,7 @@ def execute_rome(
         for k, v in weights.items():
             v[...] = weights_copy[k]
 
-    print(f"Deltas successfully computed for {list(weights.keys())}")
+    # print(f"Deltas successfully computed for {list(weights.keys())}")
 
     return deltas
 
@@ -149,6 +151,6 @@ def get_context_templates(model, tok, length_params):
             )
         ]
 
-        print(f"Cached context templates {CONTEXT_TEMPLATES_CACHE}")
+        # print(f"Cached context templates {CONTEXT_TEMPLATES_CACHE}")
 
     return CONTEXT_TEMPLATES_CACHE

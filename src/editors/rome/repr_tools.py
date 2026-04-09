@@ -39,7 +39,7 @@ def get_words_idxs_in_templates(
 ) -> int:
     assert all(
         tmp.count("{}") == 1 for tmp in context_templates
-    ), "We currently do not support multiple fill-ins for context"
+    ), f"We currently do not support multiple fill-ins for context: {context_templates}"
 
     prefixes_len, words_len, suffixes_len, inputs_len = [], [], [], []
     for i, context in enumerate(context_templates):

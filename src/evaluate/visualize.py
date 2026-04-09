@@ -334,5 +334,7 @@ def table_results(
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
     print(f"eval={eval_method} | variant={variant} | model={model} | milestones={milestones}")
-    display(df)
-    return df
+    # display(df)
+    styled_df = df.style.set_properties(**{'text-align': 'center'}) \
+                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
+    return styled_df

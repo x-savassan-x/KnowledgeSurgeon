@@ -486,16 +486,16 @@ def load_cached_state(cachefile, args, quiet=False, throw=False):
             dat = unbox_numpy_null(numpy.load(cachefile))
         for a, v in args.items():
             if a not in dat or dat[a] != v:
-                if not quiet:
-                    print("%s %s changed from %s to %s" % (cachefile, a, dat[a], v))
+                if not quiet:...
+                    # print("%s %s changed from %s to %s" % (cachefile, a, dat[a], v))
                 return None
     except (FileNotFoundError, ValueError) as e:
         if throw:
             raise e
         return None
     else:
-        if not quiet:
-            print("Loading cached %s" % cachefile)
+        if not quiet:...
+            # print("Loading cached %s" % cachefile)
         return dat
 
 
@@ -593,10 +593,10 @@ def make_loader(
     if sample_size is not None:
         assert sampler is None, "sampler cannot be specified with sample_size"
         if sample_size > len(dataset):
-            print(
-                "Warning: sample size %d > dataset size %d"
-                % (sample_size, len(dataset))
-            )
+            # print(
+            #     "Warning: sample size %d > dataset size %d"
+            #     % (sample_size, len(dataset))
+            # )
             sample_size = len(dataset)
         if random_sample is None:
             sampler = FixedSubsetSampler(list(range(sample_size)))
