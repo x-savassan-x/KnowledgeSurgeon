@@ -147,6 +147,8 @@ async def get_judge_scores(
     if not records:
         return
 
+    base_url = config.get("base_url")
+    api_key = config.get("api_key")
     judge_model = config.get("judge_model")
     judge_extra_config = config.get("judge_extra_config", {})
 
@@ -228,7 +230,7 @@ async def get_judge_scores(
         "{}"
     )
 
-    client = AsyncOpenAI()
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     semaphore = asyncio.Semaphore(max_concurrency)
 
     def _assign_values(records: list[EvalRecord], lines: list[str]) -> bool:
@@ -265,8 +267,7 @@ async def get_judge_scores(
                         {"role": "system", "content": "You are a strict grading assistant. Reject corrupted outputs before grading correctness."},
                         {"role": "user", "content": prompt_template.format(len(batch), task_input)},
                     ],
-                    temperature=0.0,
-                    extra_body=judge_extra_config,
+                    **judge_extra_config,
                 )
             except Exception:
                 return batch, 0
