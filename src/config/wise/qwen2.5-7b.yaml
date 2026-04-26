@@ -2,6 +2,8 @@ alg_name: WISE
 model_name: Qwen/Qwen2.5-7B
 gpu_id: 0
 fp16: True
+model_parallel: False
+device_map: auto
 
 mask_ratio: 0.2
 edit_lr: 1.0

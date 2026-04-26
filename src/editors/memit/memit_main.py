@@ -10,6 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from ..rome.layer_stats import layer_stats
 from ...utils import nethook
 from ...utils.generate import generate_fast
+from ...utils.devices import get_module_device, to_param_device
 
 from .compute_ks import compute_ks
 from .compute_z import compute_z, get_module_input_output_at_words, find_fact_lookup_idx
@@ -45,9 +46,10 @@ def apply_memit_to_model(
 
     with torch.no_grad():
         for w_name, (key_mat, val_mat) in deltas.items():
-            key_mat, val_mat = key_mat.to(hparams.device), val_mat.to(hparams.device)
-            upd_matrix = key_mat @ val_mat.T
             w = nethook.get_parameter(model, w_name)
+            key_mat = to_param_device(key_mat, w)
+            val_mat = to_param_device(val_mat, w)
+            upd_matrix = key_mat @ val_mat.T
             upd_matrix = upd_matrix_match_shape(upd_matrix, w.shape)
 
             if return_orig_weights and w_name not in weights_copy:
@@ -106,6 +108,11 @@ def execute_memit(
     # Compute z for final layer
     context_templates = get_context_templates(model, tok)
     z_layer = hparams.layers[-1]
+    z_device = get_module_device(
+        model,
+        hparams.layer_module_tmp.format(z_layer),
+        fallback=hparams.device,
+    )
     z_list = []
 
     for request in requests:
@@ -126,7 +133,7 @@ def execute_memit(
         ):
             try:
                 data = np.load(cache_fname)
-                z_list.append(torch.from_numpy(data["v_star"]).to(hparams.device))
+                z_list.append(torch.from_numpy(data["v_star"]).to(z_device))
                 data_loaded = True
             except Exception as e:...
                 # print(f"Error reading cache file due to {e}. Recomputing...")
@@ -161,6 +168,11 @@ def execute_memit(
 
         # Get current model activations
         layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
+        layer_device = get_module_device(
+            model,
+            hparams.rewrite_module_tmp.format(layer),
+            fallback=hparams.device,
+        )
         # print(f"Writing {layer_ks.size(1)} key/value pair(s) into layer {layer}")
 
         # Compute residual error
@@ -174,7 +186,7 @@ def execute_memit(
             fact_token_strategy=hparams.fact_token,
             track='out'
         ).T
-        targets = zs - cur_zs
+        targets = zs.to(cur_zs.device) - cur_zs
         # print("z error", torch.linalg.norm(targets, dim=0).mean())
 
         repeat_factor = (layer_ks.size(1) // targets.size(1))
@@ -198,9 +210,10 @@ def execute_memit(
 
         # Compute update in float32 to avoid the large float64 memory blow-up.
         layer_ks, targets = (
-            layer_ks.float(),
-            targets.float(),
+            layer_ks.to(layer_device).float(),
+            targets.to(layer_device).float(),
         )
+        cov = cov.to(layer_device)
 
         adj_k = torch.linalg.solve(
             hparams.mom2_update_weight * cov.float() + layer_ks @ layer_ks.T,
@@ -277,7 +290,9 @@ def get_cov(
         COV_CACHE[key] = stat.mom2.moment().float().to("cpu")
 
     return (
-        torch.inverse(COV_CACHE[key].to(hparams.device)) if inv else COV_CACHE[key].to(hparams.device)
+        torch.inverse(COV_CACHE[key].to(get_module_device(model, layer_name, fallback=hparams.device)))
+        if inv
+        else COV_CACHE[key].to(get_module_device(model, layer_name, fallback=hparams.device))
     )
 
 

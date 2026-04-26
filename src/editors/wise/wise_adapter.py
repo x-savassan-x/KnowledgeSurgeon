@@ -300,7 +300,7 @@ class WISEModule(torch.nn.Module):
     def get_adapter_layer(self):
         adapter_layer = getattr(self.edit_module, self.layer_name)
         assert type(adapter_layer) is WISEAdapter
-        return adapter_layer.to(self.model.device)
+        return adapter_layer.to(adapter_layer.device)
 
     def edit(self, config, tokens, act_mask=None, deact_mask=None):
         global edit_history, merge_group_edit_history

@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from . import repr_tools
 from .layer_stats import layer_stats
+from ...utils.devices import get_module_device
 
 # Cache variables
 inv_mom2_cache = {}
@@ -42,9 +43,10 @@ def get_inv_cov(
             precision=mom2_dtype,
             hparams=hparams
         )
+        layer_device = get_module_device(model, layer_name, fallback=hparams.device)
         inv_mom2_cache[key] = torch.inverse(
-            stat.mom2.moment().to(hparams.device)
-        ).float()
+            stat.mom2.moment().to(layer_device)
+        ).float().cpu()
 
     return inv_mom2_cache[key]
 

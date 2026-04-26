@@ -2,6 +2,8 @@ alg_name: FT
 model_name: Qwen/Qwen2.5-7B
 gpu_id: 0
 fp16: True
+model_parallel: False
+device_map: auto
 
 layers: [27]
 num_steps: 25

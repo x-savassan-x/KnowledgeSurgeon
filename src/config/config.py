@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 import torch
 
@@ -35,6 +36,12 @@ class Config:
 
     # When True, load model in bfloat16 instead of float32
     fp16: bool
+
+    # When True, load large models sharded across visible GPUs via HF device_map.
+    model_parallel: bool = False
+
+    # Optional explicit HF device_map. If omitted with model_parallel=True, use "auto".
+    device_map: Any | None = None
 
     def __post_init__(self):
         self.device = torch.device(f"cuda:{self.gpu_id}")

@@ -6,6 +6,7 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils import nethook
+from ...utils.devices import get_model_device
 
 
 def apply_ft_to_model(
@@ -54,7 +55,7 @@ def execute_ft(
     Executes the FT update algorithm for the specified update at the specified layer
     Invariant: model at beginning of function == model at end of function
     """
-    device = hparams.device
+    device = get_model_device(model, fallback=hparams.device)
     # model = model.to(device)
     # Update target and print info
     requests = deepcopy(requests)

@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.nethook import Trace, set_requires_grad
+from ...utils.devices import get_model_device
 from ...utils.runningstats import CombinedStat, Mean, NormMean, SecondMoment, tally
 
 from .tok_dataset import (
@@ -127,12 +128,15 @@ def layer_stats(
     with torch.no_grad():
         for batch_group in progress(loader, total=batch_count):
             for batch in batch_group:
-                batch = dict_to_(batch, hparams.device)
+                batch = dict_to_(batch, get_model_device(model, fallback=hparams.device))
                 with Trace(
                     model, layer_name, retain_input=True, retain_output=False, stop=True
                 ) as tr:
                     model(**batch)
-                feats = flatten_masked_batch(tr.input, batch["attention_mask"])
+                feats = flatten_masked_batch(
+                    tr.input,
+                    batch["attention_mask"].to(tr.input.device),
+                )
                 feats = feats.to(dtype=dtype)
                 stat.add(feats)
     return stat

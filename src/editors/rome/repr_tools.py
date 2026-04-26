@@ -10,6 +10,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils import nethook
+from ...utils.devices import get_model_device
 
 
 def get_reprs_at_word_tokens(
@@ -102,7 +103,7 @@ def get_reprs_at_idxs(
 
     for batch_contexts, batch_idxs in _batch(n=128):
         contexts_tok = tok(batch_contexts, padding=True, return_tensors="pt").to(
-            next(model.parameters()).device
+            get_model_device(model)
         )
 
         with torch.no_grad():

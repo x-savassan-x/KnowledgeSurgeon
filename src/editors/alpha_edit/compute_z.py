@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ..rome import repr_tools
 from ...utils import nethook
+from ...utils.devices import get_model_device, get_module_device
 
 
 def compute_z(
@@ -32,10 +33,15 @@ def compute_z(
         lm_b = next(model.parameters()).new_zeros(model.config.vocab_size)
 
     # print("Computing right vector (v)")
-    device = hparams.device
+    input_device = get_model_device(model, fallback=hparams.device)
+    delta_device = get_module_device(
+        model,
+        hparams.layer_module_tmp.format(layer),
+        fallback=input_device,
+    )
 
     # Tokenize target into list of int token IDs
-    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(device)[0]
+    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(input_device)[0]
 
     if target_ids[0] == tok.bos_token_id or target_ids[0] == tok.unk_token_id:
         target_ids = target_ids[1:]
@@ -51,10 +57,10 @@ def compute_z(
         [prompt.format(request["subject"]) for prompt in all_prompts],
         return_tensors="pt",
         padding=True,
-    ).to(device)
+    ).to(input_device)
 
     # Compute rewriting targets
-    rewriting_targets = torch.tensor(-100, device=device).repeat(
+    rewriting_targets = torch.tensor(-100, device=input_device).repeat(
         len(rewriting_prompts), *input_tok["input_ids"].shape[1:]
     )
 
@@ -79,9 +85,9 @@ def compute_z(
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
     # target token to be predicted at the final layer.
     if hasattr(model.config, 'n_embd'):
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=device)
+        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=delta_device)
     elif hasattr(model.config, 'hidden_size'):
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=device)
+        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
     else:
         raise NotImplementedError
     target_init, kl_distr_init = None, None
@@ -156,6 +162,9 @@ def compute_z(
         if output.shape[1] != rewriting_targets.shape[1]:
             output = torch.transpose(output, 0, 1)
         full_repr = output[:len(rewriting_prompts)]
+        full_repr = full_repr.to(
+            get_module_device(model, hparams.ln_f_module, fallback=full_repr.device)
+        )
 
         log_probs = torch.log_softmax(ln_f(full_repr) @ lm_w.to(full_repr.device) + lm_b.to(full_repr.device), dim=2)
         loss = torch.gather(

@@ -5,6 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .wise_adapter import WISEModule
 from .wise_utils import tokenize, get_context_templates
+from ...utils.devices import get_model_device
 
 
 def apply_wise_to_model(
@@ -18,7 +19,8 @@ def apply_wise_to_model(
     if copy:
         model = deepcopy(model)
 
-    device = hparams.device
+    device = get_model_device(model, fallback=hparams.device)
+    hparams.device = device
     context_templates = get_context_templates(
         model, tok,
         length_params=[[5, 5], [10, 5]],

@@ -5,6 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .edtior_utils import EditRequest
 from ..config import Config
+from ..utils.devices import get_model_device
 
 
 class Editor(ABC):
@@ -12,10 +13,20 @@ class Editor(ABC):
         self.config = config
         self.device = config.device
 
+        model_kwargs = {
+            "dtype": torch.bfloat16 if config.fp16 else torch.float32,
+        }
+        if config.model_parallel:
+            model_kwargs["device_map"] = config.device_map or "auto"
+
         self.model = AutoModelForCausalLM.from_pretrained(
             config.model_name,
-            dtype=torch.bfloat16 if config.fp16 else torch.float32,
-        ).to(self.device)
+            **model_kwargs,
+        )
+        if not config.model_parallel:
+            self.model = self.model.to(self.device)
+        self.device = get_model_device(self.model, fallback=config.device)
+        self.config.device = self.device
 
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         if not self.tokenizer.pad_token:

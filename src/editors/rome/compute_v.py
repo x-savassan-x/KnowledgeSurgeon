@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from . import repr_tools
 from ...utils import nethook
+from ...utils.devices import get_model_device, get_module_device
 
 
 def compute_v(
@@ -18,9 +19,14 @@ def compute_v(
     context_templates: List[str],
 ) -> torch.Tensor:
     # print("Computing right vector (v)")
-    device = hparams.device
+    input_device = get_model_device(model, fallback=hparams.device)
+    delta_device = get_module_device(
+        model,
+        hparams.mlp_module_tmp.format(layer),
+        fallback=input_device,
+    )
 
-    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(device)[0]
+    target_ids = tok.encode(request["target_new"], return_tensors="pt", add_special_tokens=False).to(input_device)[0]
 
     rewriting_prompts, kl_prompts = [
         context.format(request["prompt"]) + tok.decode(target_ids[:-1])
@@ -32,9 +38,9 @@ def compute_v(
         [prompt.format(request["subject"]) for prompt in all_prompts],
         return_tensors="pt",
         padding=True,
-    ).to(device)
+    ).to(input_device)
 
-    rewriting_targets = torch.tensor(-100, device=device).repeat(
+    rewriting_targets = torch.tensor(-100, device=input_device).repeat(
         len(rewriting_prompts), *input_tok["input_ids"].shape[1:]
     )
     for i in range(len(rewriting_prompts)):
@@ -57,9 +63,9 @@ def compute_v(
     # print(f"Tying optimization objective to {loss_layer}")
 
     if hasattr(model.config, 'n_embd'):
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=device)
+        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=delta_device)
     else:
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=device)
+        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
     target_init, kl_distr_init = None, None
 
     def edit_output_fn(cur_out, cur_layer):
@@ -111,7 +117,7 @@ def compute_v(
         loss = torch.gather(
             log_probs,
             2,
-            torch.where(rewriting_targets != -100, rewriting_targets, 0).unsqueeze(2),
+            torch.where(rewriting_targets != -100, rewriting_targets, 0).unsqueeze(2).to(log_probs.device),
         ).squeeze(2)
         mask = (rewriting_targets != -100).float()
 
@@ -123,7 +129,7 @@ def compute_v(
         weight_decay = hparams.v_weight_decay * (
             torch.norm(delta) / torch.norm(target_init).pow(2)
         )
-        loss = nll_loss + kl_loss + weight_decay
+        loss = nll_loss + kl_loss.to(nll_loss.device) + weight_decay.to(nll_loss.device)
         # print(
         #     f"loss {np.round(loss.item(), 3)} = {np.round(nll_loss.item(), 3)} + {np.round(kl_loss.item(), 3)} + {np.round(weight_decay.item(), 3)} "
         #     f"avg prob of [{request['target_new']}] "
@@ -155,6 +161,9 @@ def compute_v(
         fact_token_strategy=hparams.fact_token,
     )
 
+    cur_input = cur_input.to(target.device)
+    cur_output = cur_output.to(target.device)
+    left_vector = left_vector.to(cur_input.device)
     right_vector = (target - cur_output) / torch.dot(cur_input, left_vector)
     # print(f"Delta norm: {(target - cur_output).norm().item()}")
     # print(

@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils import nethook
 from ...utils.generate import generate_fast
+from ...utils.devices import to_param_device
 
 from .compute_u import compute_u
 from .compute_v import compute_v
@@ -32,8 +33,10 @@ def apply_rome_to_model(
 
     with torch.no_grad():
         for w_name, (delta_u, delta_v) in deltas.items():
-            upd_matrix = delta_u.unsqueeze(1) @ delta_v.unsqueeze(0)
             w = nethook.get_parameter(model, w_name)
+            delta_u = to_param_device(delta_u, w)
+            delta_v = to_param_device(delta_v, w)
+            upd_matrix = delta_u.unsqueeze(1) @ delta_v.unsqueeze(0)
             upd_matrix = upd_matrix_match_shape(upd_matrix, w.shape)
 
             if return_orig_weights and w_name not in weights_copy:
@@ -100,6 +103,8 @@ def execute_rome(
 
         with torch.no_grad():
             weight_name = f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+            left_vector = to_param_device(left_vector, weights[weight_name])
+            right_vector = to_param_device(right_vector, weights[weight_name])
             upd_matrix = left_vector.unsqueeze(1) @ right_vector.unsqueeze(0)
             upd_matrix = upd_matrix_match_shape(upd_matrix, weights[weight_name].shape)
 

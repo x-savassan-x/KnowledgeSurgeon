@@ -4,6 +4,8 @@ from typing import List, Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from .devices import get_model_device
+
 
 def generate_fast(
     model: AutoModelForCausalLM,
@@ -21,9 +23,7 @@ def generate_fast(
 
     # Unroll prompts and tokenize
     inp = [prompt for prompt in prompts for _ in range(n_gen_per_prompt)]
-    inp_tok = tok(inp, padding=True, return_tensors="pt").to(
-        next(model.parameters()).device
-    )
+    inp_tok = tok(inp, padding=True, return_tensors="pt").to(get_model_device(model))
     input_ids, attention_mask = inp_tok["input_ids"], inp_tok["attention_mask"]
     if vanilla_generation:
         gen_txt = model.generate(

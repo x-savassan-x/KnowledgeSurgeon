@@ -6,6 +6,8 @@ import torch
 from openai import AsyncOpenAI
 from tqdm.auto import tqdm
 
+from ..utils.devices import get_model_device
+
 
 @dataclass
 class EvalPair:
@@ -64,7 +66,7 @@ def get_model_predictions(
         prompts,
         return_tensors="pt",
         padding=True,
-    ).to(model.device)
+    ).to(get_model_device(model))
     tokenizer.padding_side = orig_padding_side
 
     with torch.no_grad():
@@ -107,7 +109,7 @@ def get_teacher_scores(
                     return_tensors="pt",
                     padding=True,
                     add_special_tokens=False,
-                ).to(model.device)
+                ).to(get_model_device(model))
 
                 labels = inputs["input_ids"].clone()
                 prompt_lens = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"])

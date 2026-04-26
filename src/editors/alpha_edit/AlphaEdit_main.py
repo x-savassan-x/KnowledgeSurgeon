@@ -10,6 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from ..rome.layer_stats import layer_stats
 from ...utils import nethook
 from ...utils.generate import generate_fast
+from ...utils.devices import get_module_device, to_param_device
 
 from .compute_ks import compute_ks
 from .compute_z import compute_z, get_module_input_output_at_words, find_fact_lookup_idx
@@ -43,7 +44,6 @@ def apply_AlphaEdit_to_model(
     """
 
     global P, P_loaded, cache_c, cache_c_new
-    device = hparams.device
 
     # Reset cache if requested
     if reset_cache:
@@ -96,8 +96,8 @@ def apply_AlphaEdit_to_model(
 
     with torch.no_grad():
         for w_name, upd_m in deltas.items():
-            upd_matrix = upd_m.to(device)
             w = nethook.get_parameter(model, w_name)
+            upd_matrix = to_param_device(upd_m, w)
             upd_matrix = upd_matrix_match_shape(upd_matrix, w.shape)
 
             if return_orig_weights and w_name not in weights_copy:
@@ -122,7 +122,6 @@ def execute_AlphaEdit(
     """
 
     deltas = {}
-    device = hparams.device
 
     # Update target and print info
     requests = deepcopy(requests)
@@ -155,6 +154,11 @@ def execute_AlphaEdit(
     # Compute z for final layer
     context_templates = get_context_templates(model, tok)
     z_layer = hparams.layers[-1]
+    z_device = get_module_device(
+        model,
+        hparams.layer_module_tmp.format(z_layer),
+        fallback=hparams.device,
+    )
     z_list = []
 
     for request in requests:
@@ -175,7 +179,7 @@ def execute_AlphaEdit(
         ):
             try:
                 data = np.load(cache_fname)
-                z_list.append(torch.from_numpy(data["v_star"]).to(device))
+                z_list.append(torch.from_numpy(data["v_star"]).to(z_device))
                 data_loaded = True
             except Exception as e:...
                 # print(f"Error reading cache file due to {e}. Recomputing...")
@@ -210,6 +214,11 @@ def execute_AlphaEdit(
 
         # Get current model activations
         layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
+        layer_device = get_module_device(
+            model,
+            hparams.rewrite_module_tmp.format(layer),
+            fallback=hparams.device,
+        )
         # print(f"Writing {layer_ks.size(1)} key/value pair(s) into layer {layer}")
 
         # Compute residual error
@@ -222,7 +231,7 @@ def execute_AlphaEdit(
             module_template=hparams.layer_module_tmp,
             fact_token_strategy=hparams.fact_token,
         )[1].T
-        targets = zs - cur_zs
+        targets = zs.to(cur_zs.device) - cur_zs
         # print("z error", torch.linalg.norm(targets, dim=0).mean())
 
         repeat_factor = (layer_ks.size(1) // targets.size(1))
@@ -231,16 +240,16 @@ def execute_AlphaEdit(
         targets = targets.float()
         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
         upd_matrix = torch.linalg.solve(
-            P[i, :, :].to(device=device, dtype=torch.float32)
+            P[i, :, :].to(device=layer_device, dtype=torch.float32)
             @ (
-                layer_ks.to(device=device, dtype=torch.float32)
-                @ layer_ks.T.to(device=device, dtype=torch.float32)
-                + cache_c[i, :, :].to(device=device, dtype=torch.float32)
+                layer_ks.to(device=layer_device, dtype=torch.float32)
+                @ layer_ks.T.to(device=layer_device, dtype=torch.float32)
+                + cache_c[i, :, :].to(device=layer_device, dtype=torch.float32)
             )
-            + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float32, device=device),
-            P[i, :, :].to(device=device, dtype=torch.float32)
-            @ layer_ks.to(device=device, dtype=torch.float32)
-            @ resid.T.to(device=device, dtype=torch.float32)
+            + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float32, device=layer_device),
+            P[i, :, :].to(device=layer_device, dtype=torch.float32)
+            @ layer_ks.to(device=layer_device, dtype=torch.float32)
+            @ resid.T.to(device=layer_device, dtype=torch.float32)
         )
 
         # Adjust update matrix shape
@@ -314,7 +323,9 @@ def get_cov(
         COV_CACHE[key] = stat.mom2.moment().float().to("cpu")
 
     return (
-        torch.inverse(COV_CACHE[key].to(hparams.device)) if inv else COV_CACHE[key].to(hparams.device)
+        torch.inverse(COV_CACHE[key].to(get_module_device(model, layer_name, fallback=hparams.device)))
+        if inv
+        else COV_CACHE[key].to(get_module_device(model, layer_name, fallback=hparams.device))
     )
 
 
