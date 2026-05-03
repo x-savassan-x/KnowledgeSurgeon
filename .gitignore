@@ -1,8 +1,9 @@
-data/
-notebook/
--notebook/evaluate.ipynb
--notebook/visualize.ipynb
-src_orig/
+data/*
+notebook/*
+!notebook/evaluate.ipynb
+!notebook/visualize.ipynb
+src_orig/*
+thesis/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
