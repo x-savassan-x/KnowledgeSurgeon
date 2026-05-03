@@ -1,0 +1,7 @@
+\section{Hybrid Complementary Editing Design}
+
+The current design hypothesis is a hybrid complementary editing system composed of two states. The first is a stable long-term checkpoint, which contains knowledge already consolidated into the model parameters. The second is a fast complementary component, which stores recent edits that have not yet been permanently integrated. The purpose of this separation is to let the system respond to new facts quickly without forcing every incoming update to become an immediate heavy rewrite of the same backbone weights.
+
+Under this design, a newly arriving fact is first inserted into the complementary component. If the same fact is revised again before consolidation, the stored entry can be overwritten directly. This keeps recent knowledge explicit and controllable, which is much harder to guarantee once the change has already been absorbed into the model parameters. When the stored set reaches a chosen threshold, the accepted edits are deduplicated and consolidated into a new stable checkpoint through a stronger batch-oriented editing mechanism.
+
+This design does not reject robust weight rewriting. On the contrary, it relies on such methods for durable factual integration. The difference lies in when they are used. Instead of applying an expensive rewriting method to every new fact immediately, the design reserves that cost for periodic consolidation. In this sense, the hybrid approach repurposes strong editors as long-term integration mechanisms rather than as the sole interface for continual updating.

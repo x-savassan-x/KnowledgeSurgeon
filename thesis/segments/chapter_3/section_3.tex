@@ -1,0 +1,7 @@
+\section{Current Implementation Scope}
+
+The completed implementation at the present stage centers on the empirical comparison layer. All experiments are conducted on Qwen2.5-7B, and all six baselines are executed under a common sequential evaluation setting. This implementation scope is intentionally narrow. The goal is not yet to claim broad cross-model generality, but to obtain a consistent and detailed comparison on one shared platform before introducing a more complex lifelong system, whose behavior would otherwise be harder to interpret.
+
+Several exploratory directions have also been examined in support of the hybrid idea. One example is a prompt canonicalizer trained to normalize paraphrases into a more common semantic form. That exploration was informative for direct single-relation prompts, but it was not adopted as the main solution because it does not transfer naturally to portability queries, which often involve multi-hop structure rather than simple paraphrase variation.
+
+Accordingly, the hybrid system remains a design direction rather than a completed algorithm. What has been implemented and validated in the current stage is the common evaluation framework, the baseline comparison, and the empirical basis for the complementary design. What remains unresolved is the exact mechanism by which the complementary component should influence model behavior before consolidation.

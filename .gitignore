@@ -1,9 +1,16 @@
 data/*
+
 notebook/*
 !notebook/evaluate.ipynb
 !notebook/visualize.ipynb
+
 src_orig/*
+
 thesis/*
+!thesis/figures
+!thesis/segments
+!thesis/ref.bib
+!thesis/main.tex
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
