@@ -8,6 +8,7 @@ from .memit import MemitConfig
 from .grace import GraceConfig
 from .wise import WiseConfig
 from .alpha_edit import AlphaEditConfig
+from .mnemo import MnemoConfig
 
 
 CONFIG_REGISTRY: dict[str, type[Config]] = {
@@ -17,6 +18,7 @@ CONFIG_REGISTRY: dict[str, type[Config]] = {
     "GRACE": GraceConfig,
     "WISE": WiseConfig,
     "AlphaEdit": AlphaEditConfig,
+    "Mnemo": MnemoConfig,
 }
 
 

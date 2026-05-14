@@ -7,6 +7,7 @@ from .memit import MEMIT
 from .grace import GRACE
 from .wise import WISE
 from .alpha_edit import AlphaEdit
+from .mnemo import Mnemo
 
 from ..config import load_config
 
@@ -18,6 +19,7 @@ EDITOR_REGISTRY: dict[str, type[Editor]] = {
     "GRACE": GRACE,
     "WISE": WISE,
     "AlphaEdit": AlphaEdit,
+    "Mnemo": Mnemo,
 }
 
 

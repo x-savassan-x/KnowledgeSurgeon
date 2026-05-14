@@ -1,0 +1,1 @@
+from .mnemo import Mnemo

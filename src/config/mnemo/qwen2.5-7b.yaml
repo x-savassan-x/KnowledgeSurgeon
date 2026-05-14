@@ -1,0 +1,11 @@
+alg_name: Mnemo
+model_name: Qwen/Qwen2.5-7B
+gpu_id: 0
+fp16: True
+model_parallel: False
+device_map: auto
+
+online_config_path: src/config/rome/qwen2.5-7b.yaml
+batch_config_path: src/config/memit/qwen2.5-7b.yaml
+buffer_capacity: 100
+auto_consolidate: True
