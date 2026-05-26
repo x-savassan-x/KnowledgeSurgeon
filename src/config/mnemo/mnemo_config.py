@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import torch
+
 from ..config import Config
 
 
@@ -43,6 +45,13 @@ class MnemoOnlineConfig:
     mom2_dtype: str = "float32"
     stats_dir: str = "./data/stats"
 
+    device: torch.device = field(init=False)
+    model_name: str = field(init=False)
+    gpu_id: int = field(init=False)
+    fp16: bool = field(init=False)
+    model_parallel: bool = field(init=False)
+    device_map: Any | None = field(init=False)
+
     def __post_init__(self):
         self.stats_dir = _resolve_project_path(self.stats_dir)
 
@@ -78,6 +87,13 @@ class MnemoBatchConfig:
     max_length: int = 40
     batch_size: int = 1
 
+    device: torch.device = field(init=False)
+    model_name: str = field(init=False)
+    gpu_id: int = field(init=False)
+    fp16: bool = field(init=False)
+    model_parallel: bool = field(init=False)
+    device_map: Any | None = field(init=False)
+
     def __post_init__(self):
         self.stats_dir = _resolve_project_path(self.stats_dir)
 
@@ -100,6 +116,7 @@ class MnemoConfig(Config):
 
         self.online_config = self._coerce_online_config(self.online)
         self.batch_config = self._coerce_batch_config(self.batch)
+        self._propagate_runtime_fields()
 
         self._validate_phase_algorithms()
 
@@ -132,3 +149,12 @@ class MnemoConfig(Config):
             raise ValueError(
                 f"Unsupported Mnemo batch phase algorithm: {self.batch_config.alg_name}."
             )
+
+    def _propagate_runtime_fields(self):
+        for phase_config in (self.online_config, self.batch_config):
+            phase_config.device = self.device
+            phase_config.model_name = self.model_name
+            phase_config.gpu_id = self.gpu_id
+            phase_config.fp16 = self.fp16
+            phase_config.model_parallel = self.model_parallel
+            phase_config.device_map = self.device_map
