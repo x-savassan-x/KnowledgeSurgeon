@@ -4,7 +4,6 @@ from typing import Any
 
 
 EVALUATION_DIR = Path(__file__).resolve().parents[2] / "data" / "evaluation"
-JUDGE_EVALUATION_DIR = EVALUATION_DIR / "llm_judge"
 
 
 def _normalize_milestones(milestones: list[int]) -> list[int]:
@@ -30,7 +29,7 @@ def build_result_path(
     dataset_name: str,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     milestones_dir = milestones_to_str(milestones)
 
     return root / dataset_variant / edited_model / editing_method / milestones_dir / f"{dataset_name}.json"
@@ -63,7 +62,7 @@ def save_benchmark_results(
 
 
 def iter_result_files(evaluation_dir: Path | str | None = None) -> list[Path]:
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     if not root.exists():
         return []
     return sorted(path for path in root.rglob("*.json") if path.is_file())
@@ -73,7 +72,7 @@ def load_result_file(
     path: Path,
     evaluation_dir: Path | str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
 
     try:
         relative = path.relative_to(root)

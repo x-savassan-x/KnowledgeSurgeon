@@ -7,7 +7,7 @@ from matplotlib.lines import Line2D
 import pandas as pd
 from IPython.display import display
 
-from .io import JUDGE_EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
+from .io import EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
 
 
 METRIC_ORDER: list[tuple[str, str]] = [
@@ -74,7 +74,7 @@ def catalog_results(
 ) -> pd.DataFrame:
     """Return one row per saved result file."""
     rows: list[dict[str, Any]] = []
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     variant_filter = _normalize_filter(variant)
     model_filter = _normalize_filter(model)
 
@@ -126,7 +126,7 @@ def _method_directory(
     method: str,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     return root / variant / model / method
 
 
@@ -170,7 +170,7 @@ def load_results(
     milestones = _normalize_milestones(milestones)
     method_filter = _normalize_filter(methods)
 
-    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     model_dir = root / variant / model
     data: dict[str, dict[str, list[float | None]]] = {}
 
