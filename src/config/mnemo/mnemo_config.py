@@ -82,7 +82,7 @@ class MnemoBatchConfig:
         self.stats_dir = _resolve_project_path(self.stats_dir)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class MnemoConfig(Config):
     online: dict[str, Any] | MnemoOnlineConfig
     batch: dict[str, Any] | MnemoBatchConfig

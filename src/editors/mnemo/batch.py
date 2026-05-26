@@ -11,11 +11,22 @@ class MnemoBatchPhase(ABC):
         self.tokenizer = tokenizer
         self.config = config
 
+    @property
+    @abstractmethod
+    def weight_names(self) -> list[str]: ...
+
     @abstractmethod
     def apply(self, requests: list[EditRequest]): ...
 
 
 class MemitBatchPhase(MnemoBatchPhase):
+    @property
+    def weight_names(self) -> list[str]:
+        return [
+            f"{self.config.batch_config.rewrite_module_tmp.format(layer)}.weight"
+            for layer in self.config.batch_config.layers
+        ]
+
     def apply(self, requests: list[EditRequest]):
         apply_memit_to_model(
             self.model,
