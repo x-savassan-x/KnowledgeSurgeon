@@ -10,8 +10,8 @@ from ...config import MemitConfig
 class MEMIT(Editor):
     config: MemitConfig
 
-    def __init__(self, config: MemitConfig):
-        super().__init__(config)
+    def __init__(self, config: MemitConfig, model=None, tokenizer=None):
+        super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "right"
         self._initial_weights: dict[str, torch.Tensor] = {}
 

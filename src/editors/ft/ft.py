@@ -9,8 +9,8 @@ from .ft_main import apply_ft_to_model
 class FT(Editor):
     config: FtConfig
 
-    def __init__(self, config: FtConfig):
-        super().__init__(config)
+    def __init__(self, config: FtConfig, model=None, tokenizer=None):
+        super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "left"
         self._initial_weights: dict[str, torch.Tensor] = {}
 

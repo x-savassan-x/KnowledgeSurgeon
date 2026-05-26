@@ -23,7 +23,7 @@ EDITOR_REGISTRY: dict[str, type[Editor]] = {
 }
 
 
-def load_editor(config_path: str) -> Editor:
+def load_editor(config_path: str, model=None, tokenizer=None) -> Editor:
     config = load_config(config_path)
 
     alg_name = config.alg_name
@@ -31,4 +31,4 @@ def load_editor(config_path: str) -> Editor:
         raise ValueError(f"Unregistered editor: {alg_name}.")
 
     editor_cls = EDITOR_REGISTRY[alg_name]
-    return editor_cls(config)
+    return editor_cls(config, model=model, tokenizer=tokenizer)

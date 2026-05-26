@@ -9,9 +9,14 @@ from ..utils.devices import get_model_device
 
 
 class Editor(ABC):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, model=None, tokenizer=None):
         self.config = config
         self.device = config.device
+
+        if model is not None and tokenizer is not None:
+            self.model = model
+            self.tokenizer = tokenizer
+            return
 
         model_kwargs = {
             "dtype": torch.bfloat16 if config.fp16 else torch.float32,

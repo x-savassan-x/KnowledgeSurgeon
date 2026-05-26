@@ -6,7 +6,6 @@ from .eval_utils import (
     EvalSuite,
     EvalResult,
     get_model_predictions,
-    get_teacher_scores,
     get_judge_scores
 )
 from .io import (

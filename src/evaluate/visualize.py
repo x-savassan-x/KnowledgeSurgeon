@@ -7,7 +7,7 @@ from matplotlib.lines import Line2D
 import pandas as pd
 from IPython.display import display
 
-from .io import EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
+from .io import JUDGE_EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
 
 
 METRIC_ORDER: list[tuple[str, str]] = [
@@ -69,14 +69,12 @@ def _extract_score_series_from_records(
 
 def catalog_results(
     evaluation_dir: Path | str | None = None,
-    eval_method: str | None = None,
     variant: str | None = None,
     model: str | None = None,
 ) -> pd.DataFrame:
     """Return one row per saved result file."""
     rows: list[dict[str, Any]] = []
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
-    eval_method_filter = _normalize_filter(eval_method)
+    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
     variant_filter = _normalize_filter(variant)
     model_filter = _normalize_filter(model)
 
@@ -86,12 +84,9 @@ def catalog_results(
             continue
 
         meta, records = loaded
-        run_eval_method = str(meta["eval_method"])
         run_variant = str(meta["variant"])
         run_model = str(meta["model"])
 
-        if eval_method_filter and run_eval_method not in eval_method_filter:
-            continue
         if variant_filter and run_variant not in variant_filter:
             continue
         if model_filter and run_model not in model_filter:
@@ -99,7 +94,6 @@ def catalog_results(
 
         rows.append(
             {
-                "eval_method": run_eval_method,
                 "variant": run_variant,
                 "model": run_model,
                 "method": meta["method"],
@@ -113,7 +107,6 @@ def catalog_results(
     if not rows:
         return pd.DataFrame(
             columns=[
-                "eval_method",
                 "variant",
                 "model",
                 "method",
@@ -124,22 +117,20 @@ def catalog_results(
             ]
         )
 
-    return pd.DataFrame(rows).sort_values(["eval_method", "variant", "model", "milestones", "method", "dataset_name"])
+    return pd.DataFrame(rows).sort_values(["variant", "model", "milestones", "method", "dataset_name"])
 
 
 def _method_directory(
-    eval_method: str,
     variant: str,
     model: str,
     method: str,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
-    return root / eval_method / variant / model / method
+    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    return root / variant / model / method
 
 
 def _load_method_metrics(
-    eval_method: str,
     variant: str,
     model: str,
     method: str,
@@ -147,7 +138,7 @@ def _load_method_metrics(
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, list[float | None]] | None:
     milestones_dir = milestones_to_str(milestones)
-    method_dir = _method_directory(eval_method, variant, model, method, evaluation_dir)
+    method_dir = _method_directory(variant, model, method, evaluation_dir)
     cfact_path = method_dir / milestones_dir / "cfact.json"
     mquake_path = method_dir / milestones_dir / "mquake.json"
 
@@ -169,19 +160,18 @@ def _load_method_metrics(
 
 
 def load_results(
-    eval_method: str,
     variant: str,
     model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
     methods: str | list[str] | None = None,
 ) -> dict[str, dict[str, list[float | None]]]:
-    """Load scores keyed by method for one eval_method/variant/model and milestone setting."""
+    """Load scores keyed by method for one variant/model and milestone setting."""
     milestones = _normalize_milestones(milestones)
     method_filter = _normalize_filter(methods)
 
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
-    model_dir = root / eval_method / variant / model
+    root = Path(evaluation_dir) if evaluation_dir else JUDGE_EVALUATION_DIR
+    model_dir = root / variant / model
     data: dict[str, dict[str, list[float | None]]] = {}
 
     if not model_dir.exists():
@@ -195,7 +185,6 @@ def load_results(
             continue
 
         metrics = _load_method_metrics(
-            eval_method=eval_method,
             variant=variant,
             model=model,
             method=method_name,
@@ -210,7 +199,6 @@ def load_results(
 
 
 def plot_results(
-    eval_method: str,
     variant: str,
     model: str,
     milestones: list[int],
@@ -221,7 +209,6 @@ def plot_results(
     """Draw three side-by-side line charts: ES, Loc, and Port."""
     milestones = _normalize_milestones(milestones)
     data = load_results(
-        eval_method=eval_method,
         variant=variant,
         model=model,
         milestones=milestones,
@@ -286,13 +273,12 @@ def plot_results(
     ]
     fig.legend(handles=legend_handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="method")
 
-    fig.suptitle(f"eval={eval_method} variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def table_results(
-    eval_method: str,
     variant: str,
     model: str,
     milestones: list[int],
@@ -302,7 +288,6 @@ def table_results(
     """Display a table where rows are methods and columns are milestone x {ES, Loc, Port}."""
     milestones = _normalize_milestones(milestones)
     data = load_results(
-        eval_method=eval_method,
         variant=variant,
         model=model,
         milestones=milestones,
@@ -333,7 +318,7 @@ def table_results(
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
-    print(f"eval={eval_method} | variant={variant} | model={model} | milestones={milestones}")
+    print(f"variant={variant} | model={model} | milestones={milestones}")
     # display(df)
     styled_df = df.style.set_properties(**{'text-align': 'center'}) \
                         .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])

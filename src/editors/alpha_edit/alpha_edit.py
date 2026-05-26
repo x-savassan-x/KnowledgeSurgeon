@@ -9,8 +9,8 @@ from ...config import AlphaEditConfig
 
 
 class AlphaEdit(Editor):
-    def __init__(self, config: AlphaEditConfig):
-        super().__init__(config)
+    def __init__(self, config: AlphaEditConfig, model=None, tokenizer=None):
+        super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "right"
         self._initial_weights: dict[str, torch.Tensor] = {}
 

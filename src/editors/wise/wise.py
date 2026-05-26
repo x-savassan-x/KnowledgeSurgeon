@@ -9,8 +9,8 @@ from ...config import WiseConfig
 class WISE(Editor):
     config: WiseConfig
 
-    def __init__(self, config: WiseConfig):
-        super().__init__(config)
+    def __init__(self, config: WiseConfig, model=None, tokenizer=None):
+        super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "left"
         self.config.sequential_edit = True
         self._wise_editor: WISEModule | None = None

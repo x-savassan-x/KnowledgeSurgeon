@@ -52,14 +52,6 @@ def get_model_predictions(
     if not prompts:
         return []
 
-    default_config = {
-        "pad_token_id": tokenizer.pad_token_id,
-        "eos_token_id": tokenizer.eos_token_id,
-        "repetition_penalty": 1.5,
-        "max_new_tokens": 128,
-    }
-    config = {**default_config, **config}
-
     orig_padding_side = tokenizer.padding_side
     tokenizer.padding_side = "left"
     inputs = tokenizer(
@@ -70,74 +62,17 @@ def get_model_predictions(
     tokenizer.padding_side = orig_padding_side
 
     with torch.no_grad():
-        output_ids = model.generate(**inputs, **config)
+        output_ids = model.generate(**inputs, **{
+            "pad_token_id": tokenizer.pad_token_id,
+            "eos_token_id": tokenizer.eos_token_id,
+            "repetition_penalty": 1.5,
+            "max_new_tokens": 128,
+            **config
+        })
 
     prompt_length = inputs["input_ids"].shape[1]
     generated_ids = output_ids[:, prompt_length:]
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-
-def get_teacher_scores(
-    model, tokenizer,
-    records: list[EvalRecord],
-    batch_size: int
-) -> None:
-
-    if not records:
-        return
-
-    if batch_size <= 0:
-        raise ValueError("batch_size must be > 0")
-
-    orig_padding_side = tokenizer.padding_side
-    tokenizer.padding_side = "right"
-
-    try:
-        with torch.no_grad(),\
-             tqdm(total=len(records),
-                  desc="Teacher Evaluation",
-                  unit="record") as pbar:
-
-            for batch in batched(records, batch_size):
-                prompts = [record.prompt for record in batch]
-                answers = [record.ground_truth for record in batch]
-
-                full_prompts = [f"{prompt} {answer}"
-                                for prompt, answer in zip(prompts, answers)]
-                inputs = tokenizer(
-                    full_prompts,
-                    return_tensors="pt",
-                    padding=True,
-                    add_special_tokens=False,
-                ).to(get_model_device(model))
-
-                labels = inputs["input_ids"].clone()
-                prompt_lens = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
-                               for prompt in prompts]
-                for idx, prompt_len in enumerate(prompt_lens):
-                    labels[idx, :prompt_len] = -100
-
-                labels = labels.masked_fill(inputs["attention_mask"] == 0, -100)
-
-                outputs = model(**inputs)
-                logits = outputs.logits
-
-                shifted_logits = logits[:, :-1, :].float()
-                shifted_labels = labels[:, 1:]
-                valid_mask = shifted_labels != -100
-
-                predicted_tokens = shifted_logits.argmax(dim=-1)
-                correct = (predicted_tokens == shifted_labels) & valid_mask
-
-                token_counts = valid_mask.sum(dim=1).clamp_min(1)
-                scores = correct.sum(dim=1).float() / token_counts
-
-                for record, score in zip(batch, scores.tolist()):
-                    record.score = float(score)
-
-                pbar.update(len(batch))
-    finally:
-        tokenizer.padding_side = orig_padding_side
 
 
 async def get_judge_scores(
@@ -263,7 +198,7 @@ async def get_judge_scores(
                 completion = await client.chat.completions.create(
                     model=judge_model,
                     messages=[
-                        {"role": "system", "content": "You are a strict grading assistant. Reject corrupted outputs before grading correctness."},
+                        {"role": "system", "content": "You are a strict grading assistant."},
                         {"role": "user", "content": prompt_template.format(len(batch), task_input)},
                     ],
                     **judge_extra_config,

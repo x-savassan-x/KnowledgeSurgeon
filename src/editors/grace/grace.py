@@ -10,8 +10,8 @@ from ...config import GraceConfig
 class GRACE(Editor):
     config: GraceConfig
 
-    def __init__(self, config: GraceConfig):
-        super().__init__(config)
+    def __init__(self, config: GraceConfig, model=None, tokenizer=None):
+        super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "left"
         self._base_model = self.model
         self._grace_model: GraceCore | None = None

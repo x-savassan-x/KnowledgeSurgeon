@@ -1,9 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ..config import Config
-from ..memit import MemitConfig
-from ..rome import RomeConfig
 
 
 def _resolve_project_path(path_value: str) -> str:
@@ -15,14 +14,83 @@ def _resolve_project_path(path_value: str) -> str:
 
 
 @dataclass
+class MnemoOnlineConfig:
+    alg_name: str = "ROME"
+
+    layers: list[int] = field(default_factory=list)
+    fact_token: str = "subject_last"
+    v_num_grad_steps: int = 20
+    v_lr: float = 5e-1
+    v_loss_layer: int = 47
+    v_weight_decay: float = 0.5
+    clamp_norm_factor: float = 4
+    kl_factor: float = 0.0625
+    mom2_adjustment: bool = False
+    context_template_length_params: list[list[int]] = field(
+        default_factory=lambda: [[5, 10], [10, 10]]
+    )
+    max_length: int = 40
+
+    rewrite_module_tmp: str = ""
+    layer_module_tmp: str = ""
+    mlp_module_tmp: str = ""
+    attn_module_tmp: str = ""
+    ln_f_module: str = ""
+    lm_head_module: str = ""
+
+    mom2_dataset: str = "wikipedia"
+    mom2_n_samples: int = 100000
+    mom2_dtype: str = "float32"
+    stats_dir: str = "./data/stats"
+
+    def __post_init__(self):
+        self.stats_dir = _resolve_project_path(self.stats_dir)
+
+
+@dataclass
+class MnemoBatchConfig:
+    alg_name: str = "MEMIT"
+
+    layers: list[int] = field(default_factory=list)
+    layer_selection: str = "all"
+    fact_token: str = "subject_last"
+    v_num_grad_steps: int = 25
+    v_lr: float = 5e-1
+    v_loss_layer: int = 27
+    v_weight_decay: float = 1e-3
+    clamp_norm_factor: float = 4
+    kl_factor: float = 0.0625
+    mom2_adjustment: bool = True
+    mom2_update_weight: float = 15000
+
+    rewrite_module_tmp: str = ""
+    layer_module_tmp: str = ""
+    mlp_module_tmp: str = ""
+    attn_module_tmp: str = ""
+    ln_f_module: str = ""
+    lm_head_module: str = ""
+
+    mom2_dataset: str = "wikipedia"
+    mom2_n_samples: int = 100000
+    mom2_dtype: str = "float32"
+    stats_dir: str = "data/layer_stats"
+
+    max_length: int = 40
+    batch_size: int = 1
+
+    def __post_init__(self):
+        self.stats_dir = _resolve_project_path(self.stats_dir)
+
+
+@dataclass
 class MnemoConfig(Config):
-    online_config_path: str = ""
-    batch_config_path: str = ""
+    online: dict[str, Any] | MnemoOnlineConfig
+    batch: dict[str, Any] | MnemoBatchConfig
     buffer_capacity: int = 100
     auto_consolidate: bool = True
 
-    online_config: RomeConfig = field(init=False)
-    batch_config: MemitConfig = field(init=False)
+    online_config: MnemoOnlineConfig = field(init=False)
+    batch_config: MnemoBatchConfig = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
@@ -30,27 +98,37 @@ class MnemoConfig(Config):
         if self.buffer_capacity <= 0:
             raise ValueError("Mnemo buffer_capacity must be positive.")
 
-        self.online_config_path = _resolve_project_path(self.online_config_path)
-        self.batch_config_path = _resolve_project_path(self.batch_config_path)
+        self.online_config = self._coerce_online_config(self.online)
+        self.batch_config = self._coerce_batch_config(self.batch)
 
-        from .. import load_config
+        self._validate_phase_algorithms()
 
-        online_config = load_config(self.online_config_path)
-        batch_config = load_config(self.batch_config_path)
+    @staticmethod
+    def _coerce_online_config(
+        phase_config: dict[str, Any] | MnemoOnlineConfig,
+    ) -> MnemoOnlineConfig:
+        if isinstance(phase_config, MnemoOnlineConfig):
+            return phase_config
+        if not isinstance(phase_config, dict):
+            raise TypeError("Mnemo online configuration must be a mapping.")
+        return MnemoOnlineConfig(**phase_config)
 
-        if not isinstance(online_config, RomeConfig):
-            raise TypeError("Mnemo online_config_path must point to a ROME config.")
-        if not isinstance(batch_config, MemitConfig):
-            raise TypeError("Mnemo batch_config_path must point to a MEMIT config.")
+    @staticmethod
+    def _coerce_batch_config(
+        phase_config: dict[str, Any] | MnemoBatchConfig,
+    ) -> MnemoBatchConfig:
+        if isinstance(phase_config, MnemoBatchConfig):
+            return phase_config
+        if not isinstance(phase_config, dict):
+            raise TypeError("Mnemo batch configuration must be a mapping.")
+        return MnemoBatchConfig(**phase_config)
 
-        self.online_config = self._synchronize_child_config(online_config)
-        self.batch_config = self._synchronize_child_config(batch_config)
-
-    def _synchronize_child_config(self, child_config: Config):
-        child_config.model_name = self.model_name
-        child_config.gpu_id = self.gpu_id
-        child_config.device = self.device
-        child_config.fp16 = self.fp16
-        child_config.model_parallel = self.model_parallel
-        child_config.device_map = self.device_map
-        return child_config
+    def _validate_phase_algorithms(self):
+        if self.online_config.alg_name != "ROME":
+            raise ValueError(
+                f"Unsupported Mnemo online phase algorithm: {self.online_config.alg_name}."
+            )
+        if self.batch_config.alg_name != "MEMIT":
+            raise ValueError(
+                f"Unsupported Mnemo batch phase algorithm: {self.batch_config.alg_name}."
+            )
