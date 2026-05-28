@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import dataclass, field
 from itertools import batched
+from statistics import mean
 
 import torch
 from openai import AsyncOpenAI
@@ -93,6 +94,7 @@ async def get_judge_scores(
     max_retries = config.get("max_retries", 5)
     init_retry_delay = config.get("init_retry_delay", 1.0)
     max_retry_delay = config.get("max_retry_delay", 30.0)
+    repeat_times = config.get("repeat_times", 1)
 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
@@ -108,6 +110,8 @@ async def get_judge_scores(
         raise ValueError("init_retry_delay must be > 0")
     if max_retry_delay < init_retry_delay:
         raise ValueError("max_retry_delay must be >= init_retry_delay")
+    if repeat_times <= 0:
+        raise ValueError("repeat_times must be > 0")
 
     task_example = (
         "=== EXAMPLE INPUT ===\n"
@@ -217,38 +221,58 @@ async def get_judge_scores(
 
             return [], len(batch)
 
-    pending_records = records
-    retry_count = -1
-    delay = 0
-
-    with tqdm(total=len(records),
-              desc="LLM Judge Evaluation",
-              unit="record") as pbar:
-        while pending_records and retry_count < max_retries:
-            await asyncio.sleep(delay)
-            pbar.write(
-                f"Evaluating {len(pending_records)} records. "
-                f"{max_retries - 1 - retry_count} retries left."
+    async def _score_once(source_records: list[EvalRecord], repeat_index: int) -> list[float]:
+        attempt_records = [
+            EvalRecord(
+                prompt=record.prompt,
+                ground_truth=record.ground_truth,
+                prediction=record.prediction,
             )
+            for record in source_records
+        ]
 
-            tasks = [asyncio.create_task(_score_batch(list(batch)))
-                     for batch in batched(pending_records, batch_size)]
+        pending_records = attempt_records
+        retry_count = -1
+        delay = 0
 
-            failed_records: list[EvalRecord] = []
-            for task in asyncio.as_completed(tasks):
-                failed_batch, passed_count = await task
-                failed_records.extend(failed_batch)
-                pbar.update(passed_count)
+        with tqdm(
+            total=len(attempt_records),
+            desc=f"LLM Judge Evaluation ({repeat_index + 1}/{repeat_times})",
+            unit="record",
+        ) as pbar:
+            while pending_records and retry_count < max_retries:
+                await asyncio.sleep(delay)
+                pbar.write(
+                    f"Evaluating {len(pending_records)} records. "
+                    f"{max_retries - 1 - retry_count} retries left."
+                )
 
-            pending_records = failed_records
+                tasks = [
+                    asyncio.create_task(_score_batch(list(batch)))
+                    for batch in batched(pending_records, batch_size)
+                ]
 
-            retry_count += 1
-            delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+                failed_records: list[EvalRecord] = []
+                for task in asyncio.as_completed(tasks):
+                    failed_batch, passed_count = await task
+                    failed_records.extend(failed_batch)
+                    pbar.update(passed_count)
 
-            if pending_records:
-                pbar.write(f"Failed records found. Retrying in {delay} seconds...")
+                pending_records = failed_records
 
-        for record in pending_records:
-            record.score = 1e-9
+                retry_count += 1
+                delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
 
-        pbar.update(len(pending_records))
+                if pending_records:
+                    pbar.write(f"Failed records found. Retrying in {delay} seconds...")
+
+            for record in pending_records:
+                record.score = 1e-9
+
+            pbar.update(len(pending_records))
+
+        return [record.score for record in attempt_records]
+
+    repeated_scores = [await _score_once(records, i) for i in range(repeat_times)]
+    for idx, record in enumerate(records):
+        record.score = mean(scores[idx] for scores in repeated_scores)

@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 from typing import Any
+from statistics import mean
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import pandas as pd
-from IPython.display import display
 
-from .io import EVALUATION_DIR, iter_result_files, load_result_file, milestones_to_str
+from .io import EVALUATION_DIR, milestones_to_str
 
 
 METRIC_ORDER: list[tuple[str, str]] = [
@@ -15,6 +15,8 @@ METRIC_ORDER: list[tuple[str, str]] = [
     ("Loc", "locality"),
     ("Port", "portability"),
 ]
+
+TIME_KEY = "avg_edit_time"
 
 
 def _normalize_filter(values: str | list[str] | None) -> set[str] | None:
@@ -67,57 +69,26 @@ def _extract_score_series_from_records(
     return [score_by_step[step] for step in milestones]
 
 
-def catalog_results(
-    evaluation_dir: Path | str | None = None,
-    variant: str | None = None,
-    model: str | None = None,
-) -> pd.DataFrame:
-    """Return one row per saved result file."""
-    rows: list[dict[str, Any]] = []
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
-    variant_filter = _normalize_filter(variant)
-    model_filter = _normalize_filter(model)
+def _extract_avg_edit_time(records: list[dict[str, Any]]) -> float | None:
+    if not records:
+        return None
 
-    for path in iter_result_files(root):
-        loaded = load_result_file(path, root)
-        if loaded is None:
-            continue
+    final_record = max(
+        (record for record in records if isinstance(record.get("step"), int)),
+        key=lambda record: record["step"],
+        default=None,
+    )
+    if final_record is None:
+        return None
 
-        meta, records = loaded
-        run_variant = str(meta["variant"])
-        run_model = str(meta["model"])
+    run_stats = final_record.get("run_stats")
+    if not isinstance(run_stats, dict):
+        return None
 
-        if variant_filter and run_variant not in variant_filter:
-            continue
-        if model_filter and run_model not in model_filter:
-            continue
-
-        rows.append(
-            {
-                "variant": run_variant,
-                "model": run_model,
-                "method": meta["method"],
-                "milestones": milestones_to_str(meta["milestones"]),
-                "dataset_name": meta["dataset_name"],
-                "num_records": len(records),
-                "path": str(path.relative_to(root)) if path.is_relative_to(root) else str(path),
-            }
-        )
-
-    if not rows:
-        return pd.DataFrame(
-            columns=[
-                "variant",
-                "model",
-                "method",
-                "milestones",
-                "dataset_name",
-                "num_records",
-                "path",
-            ]
-        )
-
-    return pd.DataFrame(rows).sort_values(["variant", "model", "milestones", "method", "dataset_name"])
+    avg_edit_time = run_stats.get(TIME_KEY)
+    if avg_edit_time is None:
+        return None
+    return float(avg_edit_time)
 
 
 def _method_directory(
@@ -152,10 +123,20 @@ def _load_method_metrics(
     with open(mquake_path, encoding="utf-8") as file:
         mquake_records = json.load(file)
 
+    time_values = [
+        value
+        for value in (
+            _extract_avg_edit_time(cfact_records),
+            _extract_avg_edit_time(mquake_records),
+        )
+        if value is not None
+    ]
+
     return {
         "success": _extract_score_series_from_records(cfact_records, "success", milestones),
         "locality": _extract_score_series_from_records(cfact_records, "locality", milestones),
         "portability": _extract_score_series_from_records(mquake_records, "portability", milestones),
+        TIME_KEY: mean(time_values) if time_values else None,
     }
 
 
@@ -198,15 +179,64 @@ def load_results(
     return data
 
 
+def table_results(
+    variant: str,
+    model: str,
+    milestones: list[int],
+    evaluation_dir: Path | str | None = None,
+    methods: str | list[str] | None = None,
+) -> pd.DataFrame:
+    """Display a table where rows are methods and columns are milestone x {ES, Loc, Port}."""
+    milestones = _normalize_milestones(milestones)
+    data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+    if not data:
+        print("No result files found for the selected variant/model/milestones.")
+        return pd.DataFrame()
+
+    columns = pd.MultiIndex.from_tuples(
+        [
+            (f"step {step}", metric_short)
+            for step in milestones
+            for metric_short, _ in METRIC_ORDER
+        ] + [("edit time", "avg sec")]
+    )
+
+    table_data: dict[str, list[str]] = {}
+    for method_name in sorted(data.keys()):
+        metrics = data[method_name]
+        row: list[str] = []
+        for step_index, _ in enumerate(milestones):
+            for _, metric_name in METRIC_ORDER:
+                value = metrics[metric_name][step_index]
+                row.append(f"{value:.4f}" if value is not None else "-")
+        avg_edit_time = metrics[TIME_KEY]
+        row.append(f"{avg_edit_time:.4f}" if avg_edit_time is not None else "-")
+        table_data[method_name] = row
+
+    df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
+    df.index.name = "method"
+    print(f"variant={variant} | model={model} | milestones={milestones}")
+    # display(df)
+    styled_df = df.style.set_properties(**{'text-align': 'center'}) \
+                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
+    return styled_df
+
+
 def plot_results(
     variant: str,
     model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
     methods: str | list[str] | None = None,
-    figsize: tuple[float, float] = (15.0, 4.0),
+    figsize: tuple[float, float] = (19.0, 4.0),
 ) -> None:
-    """Draw three side-by-side line charts: ES, Loc, and Port."""
+    """Draw score curves plus one average edit-time comparison chart."""
     milestones = _normalize_milestones(milestones)
     data = load_results(
         variant=variant,
@@ -226,7 +256,7 @@ def plot_results(
         for index, method_name in enumerate(methods_sorted)
     }
 
-    fig, axes = plt.subplots(1, 3, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(1, 4, figsize=figsize, squeeze=False)
     axes_row = axes[0]
 
     for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
@@ -267,6 +297,31 @@ def plot_results(
         ax.set_title(short_name, fontweight="bold")
         ax.grid(alpha=0.25)
 
+    time_ax = axes_row[3]
+    time_values = [data[method_name][TIME_KEY] for method_name in methods_sorted]
+    has_any_bar = any(value is not None for value in time_values)
+    if has_any_bar:
+        bar_methods = [method_name for method_name in methods_sorted if data[method_name][TIME_KEY] is not None]
+        bar_values = [data[method_name][TIME_KEY] for method_name in bar_methods]
+        bar_colors = [method_colors[method_name] for method_name in bar_methods]
+        time_ax.bar(bar_methods, bar_values, color=bar_colors, width=0.7)
+        time_ax.tick_params(axis="x", rotation=45)
+        time_ax.set_ylabel("seconds")
+    else:
+        time_ax.text(
+            0.5,
+            0.5,
+            "no data",
+            ha="center",
+            va="center",
+            transform=time_ax.transAxes,
+            fontsize=9,
+            color="gray",
+        )
+        time_ax.set_xticks([])
+    time_ax.set_title("Time", fontweight="bold")
+    time_ax.grid(axis="y", alpha=0.25)
+
     legend_handles = [
         Line2D([0], [0], color=method_colors[method_name], lw=2, label=method_name)
         for method_name in methods_sorted
@@ -276,50 +331,3 @@ def plot_results(
     fig.suptitle(f"variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
-
-
-def table_results(
-    variant: str,
-    model: str,
-    milestones: list[int],
-    evaluation_dir: Path | str | None = None,
-    methods: str | list[str] | None = None,
-) -> pd.DataFrame:
-    """Display a table where rows are methods and columns are milestone x {ES, Loc, Port}."""
-    milestones = _normalize_milestones(milestones)
-    data = load_results(
-        variant=variant,
-        model=model,
-        milestones=milestones,
-        evaluation_dir=evaluation_dir,
-        methods=methods,
-    )
-    if not data:
-        print("No result files found for the selected variant/model/milestones.")
-        return pd.DataFrame()
-
-    columns = pd.MultiIndex.from_tuples(
-        [
-            (f"step {step}", metric_short)
-            for step in milestones
-            for metric_short, _ in METRIC_ORDER
-        ]
-    )
-
-    table_data: dict[str, list[str]] = {}
-    for method_name in sorted(data.keys()):
-        metrics = data[method_name]
-        row: list[str] = []
-        for step_index, _ in enumerate(milestones):
-            for _, metric_name in METRIC_ORDER:
-                value = metrics[metric_name][step_index]
-                row.append(f"{value:.4f}" if value is not None else "-")
-        table_data[method_name] = row
-
-    df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
-    df.index.name = "method"
-    print(f"variant={variant} | model={model} | milestones={milestones}")
-    # display(df)
-    styled_df = df.style.set_properties(**{'text-align': 'center'}) \
-                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
-    return styled_df
