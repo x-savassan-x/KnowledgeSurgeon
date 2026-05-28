@@ -49,6 +49,13 @@ def _score_from_metric(metric_value: Any) -> float | None:
     return None
 
 
+def _mean_ignore_none(values: list[float | None]) -> float | None:
+    valid_values = [value for value in values if value is not None]
+    if not valid_values:
+        return None
+    return mean(valid_values)
+
+
 def _extract_score_series_from_records(
     records: list[dict[str, Any]],
     metric_name: str,
@@ -179,6 +186,31 @@ def load_results(
     return data
 
 
+def load_mean_results(
+    variant: str,
+    model: str,
+    milestones: list[int],
+    evaluation_dir: Path | str | None = None,
+    methods: str | list[str] | None = None,
+) -> dict[str, dict[str, float | None]]:
+    """Load one mean value per metric for each method across the selected milestones."""
+    data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+
+    return {
+        method_name: {
+            metric_name: _mean_ignore_none(metrics[metric_name])
+            for _, metric_name in METRIC_ORDER
+        }
+        for method_name, metrics in data.items()
+    }
+
+
 def table_results(
     variant: str,
     model: str,
@@ -204,7 +236,7 @@ def table_results(
             (f"step {step}", metric_short)
             for step in milestones
             for metric_short, _ in METRIC_ORDER
-        ] + [("edit time", "avg sec")]
+        ]
     )
 
     table_data: dict[str, list[str]] = {}
@@ -215,8 +247,6 @@ def table_results(
             for _, metric_name in METRIC_ORDER:
                 value = metrics[metric_name][step_index]
                 row.append(f"{value:.4f}" if value is not None else "-")
-        avg_edit_time = metrics[TIME_KEY]
-        row.append(f"{avg_edit_time:.4f}" if avg_edit_time is not None else "-")
         table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
@@ -228,15 +258,60 @@ def table_results(
     return styled_df
 
 
+def table_mean_results(
+    variant: str,
+    model: str,
+    milestones: list[int],
+    evaluation_dir: Path | str | None = None,
+    methods: str | list[str] | None = None,
+) -> pd.DataFrame:
+    """Display one mean value per metric for each method across the selected milestones, plus average edit time."""
+    data = load_mean_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+    full_data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+    if not data or not full_data:
+        print("No result files found for the selected variant/model/milestones.")
+        return pd.DataFrame()
+
+    columns = [short_name for short_name, _ in METRIC_ORDER] + ["Time"]
+    table_data: dict[str, list[str]] = {}
+    for method_name in sorted(data.keys()):
+        row = []
+        for _, metric_name in METRIC_ORDER:
+            value = data[method_name][metric_name]
+            row.append(f"{value:.4f}" if value is not None else "-")
+        avg_edit_time = full_data[method_name][TIME_KEY]
+        row.append(f"{avg_edit_time:.4f}" if avg_edit_time is not None else "-")
+        table_data[method_name] = row
+
+    df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
+    df.index.name = "method"
+    print(f"metric means | variant={variant} | model={model} | milestones={milestones}")
+    styled_df = df.style.set_properties(**{'text-align': 'center'}) \
+                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])])
+    return styled_df
+
+
 def plot_results(
     variant: str,
     model: str,
     milestones: list[int],
     evaluation_dir: Path | str | None = None,
     methods: str | list[str] | None = None,
-    figsize: tuple[float, float] = (19.0, 4.0),
+    figsize: tuple[float, float] = (15.0, 4.0),
 ) -> None:
-    """Draw score curves plus one average edit-time comparison chart."""
+    """Draw three side-by-side line charts: ES, Loc, and Port."""
     milestones = _normalize_milestones(milestones)
     data = load_results(
         variant=variant,
@@ -256,7 +331,7 @@ def plot_results(
         for index, method_name in enumerate(methods_sorted)
     }
 
-    fig, axes = plt.subplots(1, 4, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(1, 3, figsize=figsize, squeeze=False)
     axes_row = axes[0]
 
     for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
@@ -297,36 +372,102 @@ def plot_results(
         ax.set_title(short_name, fontweight="bold")
         ax.grid(alpha=0.25)
 
-    time_ax = axes_row[3]
-    time_values = [data[method_name][TIME_KEY] for method_name in methods_sorted]
-    has_any_bar = any(value is not None for value in time_values)
-    if has_any_bar:
-        bar_methods = [method_name for method_name in methods_sorted if data[method_name][TIME_KEY] is not None]
-        bar_values = [data[method_name][TIME_KEY] for method_name in bar_methods]
-        bar_colors = [method_colors[method_name] for method_name in bar_methods]
-        time_ax.bar(bar_methods, bar_values, color=bar_colors, width=0.7)
-        time_ax.tick_params(axis="x", rotation=45)
-        time_ax.set_ylabel("seconds")
-    else:
-        time_ax.text(
-            0.5,
-            0.5,
-            "no data",
-            ha="center",
-            va="center",
-            transform=time_ax.transAxes,
-            fontsize=9,
-            color="gray",
-        )
-        time_ax.set_xticks([])
-    time_ax.set_title("Time", fontweight="bold")
-    time_ax.grid(axis="y", alpha=0.25)
-
     legend_handles = [
         Line2D([0], [0], color=method_colors[method_name], lw=2, label=method_name)
         for method_name in methods_sorted
     ]
     fig.legend(handles=legend_handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="method")
+
+    fig.suptitle(f"variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    plt.show()
+
+
+def plot_mean_results(
+    variant: str,
+    model: str,
+    milestones: list[int],
+    evaluation_dir: Path | str | None = None,
+    methods: str | list[str] | None = None,
+    figsize: tuple[float, float] = (20.0, 4.5),
+) -> None:
+    """Draw one bar chart per metric, plus one for average edit time."""
+    mean_data = load_mean_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+    full_data = load_results(
+        variant=variant,
+        model=model,
+        milestones=milestones,
+        evaluation_dir=evaluation_dir,
+        methods=methods,
+    )
+    if not mean_data or not full_data:
+        print("No result files found for the selected variant/model/milestones.")
+        return
+
+    methods_sorted = sorted(mean_data.keys())
+    panel_specs = list(METRIC_ORDER) + [("Time", TIME_KEY)]
+    cmap = plt.colormaps.get_cmap("tab10")
+    method_colors = {
+        method_name: cmap(index % max(1, len(cmap.colors)))
+        for index, method_name in enumerate(methods_sorted)
+    }
+
+    fig, axes = plt.subplots(1, len(panel_specs), figsize=figsize, squeeze=False)
+    axes_row = axes[0]
+
+    for idx, (label, metric_name) in enumerate(panel_specs):
+        ax = axes_row[idx]
+        if metric_name == TIME_KEY:
+            values = [full_data[method_name][TIME_KEY] for method_name in methods_sorted]
+            ylabel = "seconds"
+            title = "Time"
+            ylim = None
+        else:
+            values = [mean_data[method_name][metric_name] for method_name in methods_sorted]
+            ylabel = "mean score"
+            title = label
+            ylim = (-0.05, 1.05)
+
+        bar_methods = [
+            method_name
+            for method_name, value in zip(methods_sorted, values)
+            if value is not None
+        ]
+        bar_values = [value for value in values if value is not None]
+        bar_colors = [method_colors[method_name] for method_name in bar_methods]
+
+        if bar_values:
+            ax.bar(
+                bar_methods,
+                bar_values,
+                color=bar_colors,
+                width=0.7,
+            )
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                "no data",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
+            ax.set_xticks([])
+
+        ax.tick_params(axis="x", rotation=45)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight="bold")
+        ax.grid(axis="y", alpha=0.25)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
 
     fig.suptitle(f"variant={variant} model={model} milestones={milestones}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
