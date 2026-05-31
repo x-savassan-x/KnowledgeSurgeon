@@ -5,8 +5,8 @@ import torch
 from torch.nn import CrossEntropyLoss
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils import nethook
 from ...utils.devices import get_model_device
+from ...utils import nethook
 
 
 def apply_ft_to_model(

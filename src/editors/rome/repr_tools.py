@@ -9,8 +9,8 @@ from typing import List
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils import nethook
 from ...utils.devices import get_model_device
+from ...utils import nethook
 
 
 def get_reprs_at_word_tokens(

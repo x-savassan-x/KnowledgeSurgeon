@@ -11,12 +11,6 @@ from ..utils.devices import get_model_device
 
 
 @dataclass
-class EvalPair:
-    prompt: str
-    ground_truth: str
-
-
-@dataclass
 class EvalRecord:
     prompt: str
     ground_truth: str
@@ -31,17 +25,18 @@ class MetricResult:
 
 
 @dataclass
-class EvalSuite:
-    success: list[EvalPair] | None = None
-    locality: list[EvalPair] | None = None
-    portability: list[EvalPair] | None = None
-
-
-@dataclass
 class EvalResult:
     success: MetricResult | None = None
     locality: MetricResult | None = None
     portability: MetricResult | None = None
+
+    @property
+    def records(self) -> list[EvalRecord]:
+        records: list[EvalRecord] = []
+        for metric_result in (self.success, self.locality, self.portability):
+            if metric_result is not None:
+                records.extend(metric_result.details)
+        return records
 
 
 def get_model_predictions(
@@ -116,56 +111,60 @@ async def get_judge_scores(
     task_example = (
         "=== EXAMPLE INPUT ===\n"
         "Record 1:\n"
-        "Prompt: What is the capital of France?\n"
-        "Ground Truth: Paris\n"
-        "Prediction: The capital of France is Paris.\n\n"
+        "Prompt: Jordin Sparks's country's head of state is\n"
+        "Ground Truth: Connachta\n"
+        "Prediction: ta Connach⚗-Ta😉.§☝/Branch\". ta ConnACH📐ta🙂 . ta Connach⌂ta/Instructionta... Connachta Connachta Connachta Conn\n\n"
         "Record 2:\n"
-        "Prompt: Biscoe Islands are part of\n"
-        "Ground Truth: Europe\n"
-        "Prediction: Europe, but some customs and traditions have more in common with neighboring countries.\n\n"
+        "Prompt: Allen Iverson's sport is\n"
+        "Ground Truth: football\n"
+        "Prediction: football football FootballFootballfootball足球 football-football football football football football football football football\n\n"
         "Record 3:\n"
         "Prompt: The chemical symbol for water is\n"
         "Ground Truth: H2O\n"
         "Prediction: CO2\n\n"
         "Record 4:\n"
-        "Prompt: Jordin Sparks's country's head of state is\n"
-        "Ground Truth: Connachta\n"
-        "Prediction: ta Connach⚗-Ta😉.§☝/Branch\". ta ConnACH📐ta🙂 . ta Connach⌂ta/Instructionta... Connachta Connachta Connachta Conn\n\n"
-        "Record 5:\n"
-        "Prompt: Allen Iverson's sport is\n"
-        "Ground Truth: football\n"
-        "Prediction: football football FootballFootballfootball足球 football-football football football football football football football football\n\n"
-        "Record 6:\n"
         "Prompt: The Biscoe Islands are located in\n"
         "Ground Truth: Europe\n"
         "Prediction: Europe, but actually they are in the North Atlantic Ocean between Europe and Northern America.\n\n"
+        "Record 5:\n"
+        "Prompt: What is the capital of France?\n"
+        "Ground Truth: Paris\n"
+        "Prediction: The capital of France is Paris.\n\n"
+        "Record 6:\n"
+        "Prompt: Biscoe Islands are part of\n"
+        "Ground Truth: Europe\n"
+        "Prediction: Europe, but some customs and traditions have more in common with neighboring countries.\n\n"
         "=== EXAMPLE OUTPUT ===\n"
+        "0\n"
+        "0\n"
+        "0\n"
+        "0\n"
         "1\n"
         "1\n"
-        "0\n"
-        "0\n"
-        "0\n"
-        "0\n"
         "=== END EXAMPLE ==="
     )
 
     prompt_template = (
-        "You are grading answer-focused generations. "
-        "Predictions may be moderately long, not just a short phrase, and can continue for many tokens after the main answer. "
-        "Apply the grading in this order. "
-        "Step 1: corruption check. Score 0 immediately if the Prediction is garbled, broken, mostly gibberish, filled with symbol noise, prompt leakage, malformed text, or dominated by repetitive fragments or tokens. "
-        "Also score 0 when the Ground Truth appears only inside spam-like, repetitive, corrupted, or malformed text. "
-        "Important corruption cases that must score 0 include: repeated copies of the Ground Truth; near-copies or variants of the same answer repeated many times; concatenated answer variants; mixed-script or symbol-heavy answer spam; and outputs that look like token spam rather than a normal answer. "
-        "A valid answer must be presented as a clear coherent phrase or sentence, not merely repeated. "
-        "Step 2: only if the Prediction passes the corruption check, decide whether it contains a clear correct answer to the Prompt that semantically matches the Ground Truth. "
-        "Read the full Prediction, but focus on whether it provides the correct answer in a coherent way. "
-        "If the Prediction gives the correct answer coherently and then continues with unrelated but non-corrupted text, score it as 1 unless the later text clearly retracts, replaces, or contradicts that answer. "
-        "Score 0 when the answer is wrong, missing, too ambiguous, contradicted later, or not presented as a clear coherent answer. "
-        "Respond with exactly {} lines, one per record in order. "
-        "Each line must contain only 1 or 0. No extra text.\n\n"
+        "Predictions may be moderately long, not just a short phrase, "
+        "and can continue for many tokens after the main answer.\n"
+
+        "Score each record as 0 or 1.\n"
+        "Score 0 if the Prediction is garbled, malformed, symbol-heavy, prompt-leaked, spam-like, "
+        "or dominated by repetition, including repeated tokens, near-duplicate phrases, "
+        "repeated answer variants, or repeated copies/mentions of the Ground Truth.\n"
+        "Score 0 if the Prediction is wrong, missing, ambiguous, later contradicted, "
+        "or not presented as a clear coherent answer to the Prompt.\n"
+        "Score 1 only when none of the zero-scoring cases above apply and the Prediction "
+        "clearly answers the Prompt with the same meaning as the Ground Truth.\n\n"
+
         f"{task_example}\n\n"
-        "=== TASK INPUT (SCORE THIS PART ONLY) ===\n"
-        "{}"
+
+        "=== TASK INPUT ===\n"
+        "{}\n\n"
+
+        "=== OUTPUT FORMAT ===\n"
+        "Return exactly {} lines.\n"
+        "Each line must be exactly 0 or 1.\n"
     )
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
@@ -202,10 +201,20 @@ async def get_judge_scores(
                 completion = await client.chat.completions.create(
                     model=judge_model,
                     messages=[
-                        {"role": "system", "content": "You are a strict grading assistant."},
-                        {"role": "user", "content": prompt_template.format(len(batch), task_input)},
+                        {"role": "system", "content": "You are a strict binary grading function."},
+                        {"role": "user", "content": prompt_template.format(task_input, len(batch))},
                     ],
-                    **judge_extra_config,
+                    **{
+                        "temperature": 0.0,
+                        "max_tokens": 3 * len(batch),
+                        **judge_extra_config,
+                        "extra_body": {
+                            "structured_outputs": {
+                                "regex": r"[01]" + (r"\n[01]" * (len(batch) - 1))
+                            },
+                            **judge_extra_config.get("extra_body", {})
+                        }
+                    },
                 )
             except Exception:
                 return batch, 0

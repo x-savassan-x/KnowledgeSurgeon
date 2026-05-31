@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..rome import repr_tools
-from ...utils import nethook
 from ...utils.devices import get_model_device, get_module_device
+from ...utils import nethook
+from ..rome import repr_tools
 
 
 def compute_z(

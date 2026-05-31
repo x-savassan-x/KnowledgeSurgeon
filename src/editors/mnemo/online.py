@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from ..edtior_utils import EditRequest
 from ...config import MnemoConfig
+from ..edtior_utils import EditRequest
 from ..rome.rome_main import apply_rome_to_model
 
 

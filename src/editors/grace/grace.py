@@ -1,10 +1,9 @@
-from .grace_main import apply_grace_to_model
-from .grace_core import GraceCore
-from .utils import tokenize
-
+from ...config import GraceConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import GraceConfig
+from .grace_core import GraceCore
+from .grace_main import apply_grace_to_model
+from .utils import tokenize
 
 
 class GRACE(Editor):

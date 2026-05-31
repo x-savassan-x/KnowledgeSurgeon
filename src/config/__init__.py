@@ -1,7 +1,6 @@
 import yaml
 
 from .config import Config
-
 from .ft import FtConfig
 from .rome import RomeConfig
 from .memit import MemitConfig

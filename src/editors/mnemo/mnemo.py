@@ -1,8 +1,8 @@
 import torch
 
+from ...config import MnemoConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import MnemoConfig
 from .batch import build_batch_phase
 from .online import build_online_phase
 

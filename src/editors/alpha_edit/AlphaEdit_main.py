@@ -7,11 +7,10 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..rome.layer_stats import layer_stats
-from ...utils import nethook
-from ...utils.generate import generate_fast
 from ...utils.devices import get_module_device, to_param_device
-
+from ...utils.generate import generate_fast
+from ...utils import nethook
+from ..rome.layer_stats import layer_stats
 from .compute_ks import compute_ks
 from .compute_z import compute_z, get_module_input_output_at_words, find_fact_lookup_idx
 

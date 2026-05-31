@@ -1,6 +1,7 @@
+from typing import Union, List
+
 import numpy as np
 import torch
-from typing import Union, List
 
 class linear:
     def __init__(self):

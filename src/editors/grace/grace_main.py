@@ -3,9 +3,9 @@ from typing import Any, Dict, List, Tuple
 
 from transformers import AutoTokenizer
 
+from ...utils.devices import get_model_device
 from .grace_core import GraceCore
 from .utils import tokenize
-from ...utils.devices import get_model_device
 
 
 def apply_grace_to_model(

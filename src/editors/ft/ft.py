@@ -1,8 +1,8 @@
 import torch
 
+from ...config import FtConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import FtConfig
 from .ft_main import apply_ft_to_model
 
 

@@ -6,10 +6,9 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils.nethook import Trace, set_requires_grad
 from ...utils.devices import get_model_device
+from ...utils.nethook import Trace, set_requires_grad
 from ...utils.runningstats import CombinedStat, Mean, NormMean, SecondMoment, tally
-
 from .tok_dataset import (
     TokenizedDataset,
     dict_to_,

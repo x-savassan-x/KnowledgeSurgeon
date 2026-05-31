@@ -1,9 +1,8 @@
-from .wise_main import apply_wise_to_model
-from .wise_adapter import WISEModule
-
+from ...config import WiseConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import WiseConfig
+from .wise_adapter import WISEModule
+from .wise_main import apply_wise_to_model
 
 
 class WISE(Editor):

@@ -1,10 +1,9 @@
 import torch
 
-from .rome_main import apply_rome_to_model
-
+from ...config import RomeConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import RomeConfig
+from .rome_main import apply_rome_to_model
 
 
 class ROME(Editor):

@@ -1,6 +1,7 @@
+from typing import Union, List
+
 import numpy as np
 import torch
-from typing import Union, List
 
 def lerp(
     t: float, v0: Union[np.ndarray, torch.Tensor], v1: Union[np.ndarray, torch.Tensor]

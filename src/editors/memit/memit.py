@@ -1,10 +1,9 @@
 import torch
 
-from .memit_main import apply_memit_to_model
-
+from ...config import MemitConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import MemitConfig
+from .memit_main import apply_memit_to_model
 
 
 class MEMIT(Editor):

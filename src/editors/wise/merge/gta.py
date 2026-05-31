@@ -1,6 +1,7 @@
 from typing import Dict, Union, Tuple, List, Any, Literal, Optional
-import torch
+
 import numpy as np
+import torch
 
 from .utils import rescaled_random, magnitude, random_wo_rescaled
 

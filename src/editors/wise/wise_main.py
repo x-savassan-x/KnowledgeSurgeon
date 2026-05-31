@@ -3,9 +3,9 @@ from typing import Any, Dict, List, Tuple
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from ...utils.devices import get_model_device
 from .wise_adapter import WISEModule
 from .wise_utils import tokenize, get_context_templates
-from ...utils.devices import get_model_device
 
 
 def apply_wise_to_model(

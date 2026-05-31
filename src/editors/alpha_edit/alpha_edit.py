@@ -1,11 +1,10 @@
 import torch
 
-from . import AlphaEdit_main as _ae_mod
-from .AlphaEdit_main import apply_AlphaEdit_to_model
-
+from ...config import AlphaEditConfig
 from ..editor import Editor
 from ..edtior_utils import EditRequest
-from ...config import AlphaEditConfig
+from . import AlphaEdit_main as _ae_mod
+from .AlphaEdit_main import apply_AlphaEdit_to_model
 
 
 class AlphaEdit(Editor):

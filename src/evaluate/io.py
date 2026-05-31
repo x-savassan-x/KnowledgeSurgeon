@@ -27,12 +27,13 @@ def build_result_path(
     editing_method: str,
     milestones: list[int],
     dataset_name: str,
+    run_index: int | None = None,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     milestones_dir = milestones_to_str(milestones)
-
-    return root / dataset_variant / edited_model / editing_method / milestones_dir / f"{dataset_name}.json"
+    filename = f"{dataset_name}.{run_index}.json" if run_index is not None else f"{dataset_name}.json"
+    return root / dataset_variant / edited_model / editing_method / milestones_dir / filename
 
 
 def save_benchmark_results(
@@ -42,6 +43,7 @@ def save_benchmark_results(
     editing_method: str,
     milestones: list[int],
     dataset_name: str,
+    run_index: int | None = None,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_result_path(
@@ -50,6 +52,7 @@ def save_benchmark_results(
         editing_method=editing_method,
         milestones=milestones,
         dataset_name=dataset_name,
+        run_index=run_index,
         evaluation_dir=evaluation_dir,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +90,14 @@ def load_result_file(
     if not filename.endswith(".json"):
         return None
 
-    dataset_name = filename[:-5]
+    stem = filename[:-5]
+    dataset_name = stem
+    run_index = None
+    if "." in stem:
+        maybe_dataset_name, maybe_run_index = stem.rsplit(".", 1)
+        if maybe_run_index.isdigit():
+            dataset_name = maybe_dataset_name
+            run_index = int(maybe_run_index)
     if not dataset_name:
         return None
 
@@ -110,5 +120,6 @@ def load_result_file(
         "method": editing_method,
         "milestones": milestones,
         "dataset_name": dataset_name,
+        "run_index": run_index,
     }
     return meta, payload

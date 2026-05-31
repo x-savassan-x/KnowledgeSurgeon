@@ -4,10 +4,9 @@ from typing import Dict, List, Tuple
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils import nethook
-from ...utils.generate import generate_fast
 from ...utils.devices import to_param_device
-
+from ...utils.generate import generate_fast
+from ...utils import nethook
 from .compute_u import compute_u
 from .compute_v import compute_v
 

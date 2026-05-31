@@ -4,8 +4,8 @@ import random
 import numpy as np
 import torch
 import transformers
-from torch import Tensor
 from torch.nn import CrossEntropyLoss, functional as F
+from torch import Tensor
 from transformers.activations import ACT2FN
 
 from .merge import slerp, GTA, linear

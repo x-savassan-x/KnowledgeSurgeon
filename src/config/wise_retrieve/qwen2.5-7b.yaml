@@ -1,0 +1,27 @@
+alg_name: WISE
+model_name: Qwen/Qwen2.5-7B
+gpu_id: 0
+fp16: True
+model_parallel: False
+device_map: auto
+
+mask_ratio: 0.2
+edit_lr: 1.0
+n_iter: 70
+norm_constraint: 1.0
+alpha: 15.0
+beta: 40.0
+gamma: 20.0
+act_ratio: 0.88
+save_freq: 10
+merge_freq: 100
+merge_alg: ties
+objective_optimization: only_label
+inner_params:
+  - model.layers.23.mlp.down_proj.weight
+
+densities: 0.53
+weights: 1.0
+
+retrieve: True
+replay: False
