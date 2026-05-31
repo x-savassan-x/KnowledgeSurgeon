@@ -204,17 +204,7 @@ async def get_judge_scores(
                         {"role": "system", "content": "You are a strict binary grading function."},
                         {"role": "user", "content": prompt_template.format(task_input, len(batch))},
                     ],
-                    **{
-                        "temperature": 0.0,
-                        "max_tokens": 3 * len(batch),
-                        **judge_extra_config,
-                        "extra_body": {
-                            "structured_outputs": {
-                                "regex": r"[01]" + (r"\n[01]" * (len(batch) - 1))
-                            },
-                            **judge_extra_config.get("extra_body", {})
-                        }
-                    },
+                    **judge_extra_config
                 )
             except Exception:
                 return batch, 0
