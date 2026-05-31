@@ -1,0 +1,22 @@
+# Python 3.12
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Data
+datasets
+huggingface_hub
+pandas
+numpy
+
+# AI
+transformers
+torch
+openai
+safetensors
+
+# Utils
+ipykernel
+ipywidgets
+python-dotenv
+pyyaml
+tqdm
+matplotlib
