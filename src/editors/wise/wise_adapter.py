@@ -40,6 +40,12 @@ def euc(query, key, config, act_mask=None, infer=False):
         return torch.mean(l2_norm, dim=-1)
 
 
+def _infer_score(dist):
+    if isinstance(dist, torch.Tensor) and dist.dim() > 0:
+        return dist.mean()
+    return dist
+
+
 class EarlyStopMeter:
     def __init__(self, patience=5, min_delta=1e-3):
         self.patience = patience
@@ -199,8 +205,8 @@ class WISEAdapter(torch.nn.Module):
                 original_layer_output = self.original_layer(*args)
                 layer_output = self.layer(*args)
                 new_weight_layer_output = self.new_weight_forward(*args)
-                dist2 = euc(original_layer_output, new_weight_layer_output, self.config, infer=True)
-                dist1 = euc(original_layer_output, layer_output, self.config, infer=True)
+                dist2 = _infer_score(euc(original_layer_output, new_weight_layer_output, self.config, infer=True))
+                dist1 = _infer_score(euc(original_layer_output, layer_output, self.config, infer=True))
                 threshold = self.editing_mean_act.min_act() * self.config.act_ratio
 
                 if dist1.item() < threshold and dist2.item() < threshold:
@@ -212,11 +218,9 @@ class WISEAdapter(torch.nn.Module):
             else:
                 original_layer_output = self.original_layer(*args)
                 new_weight_layer_output = self.new_weight_forward(*args)
-                dist1 = euc(original_layer_output, new_weight_layer_output, self.config, infer=True)
+                dist1 = _infer_score(euc(original_layer_output, new_weight_layer_output, self.config, infer=True))
                 threshold = self.editing_mean_act.min_act() * self.config.act_ratio
                 min_dist = dist1
-                if min_dist.dim() > 0:
-                    min_dist = min_dist.mean()
                 if min_dist.item() < threshold:
                     layer_out = original_layer_output
                 else:
@@ -225,7 +229,7 @@ class WISEAdapter(torch.nn.Module):
                 for i in range(len(self.memory_weight)):
                     memory_retrieve_weight = self.memory_weight[i]
                     memory_weight_layer_output = F.linear(*args, memory_retrieve_weight)
-                    dist = euc(original_layer_output, memory_weight_layer_output, self.config, infer=True)
+                    dist = _infer_score(euc(original_layer_output, memory_weight_layer_output, self.config, infer=True))
                     if dist > min_dist and dist > self.memory_mean_act[i].min_act() * self.config.act_ratio:
                         layer_out = memory_weight_layer_output
                         min_dist = dist
