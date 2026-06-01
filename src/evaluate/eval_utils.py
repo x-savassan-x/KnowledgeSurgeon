@@ -150,19 +150,24 @@ async def get_judge_scores(
     )
 
     prompt_template = (
-        "Predictions may be moderately long, not just a short phrase, "
-        "and can continue for many tokens after the main answer.\n"
+        "Apply the rubric in order. Stop at the first matching rule.\n\n"
 
-        "Score each record as 0 or 1.\n"
-        "Score 0 first if the Prediction is garbled, malformed, symbol-heavy, prompt-leaked, spam-like, "
-        "or dominated by repetition, including repeated tokens, near-duplicate phrases, "
-        "repeated answer variants, or repeated copies/mentions of the Ground Truth, especially when this prevents "
-        "the answer from being a clear coherent response to the Prompt.\n"
-        "If the Prediction is coherent enough to read as an answer, then score 0 if it is wrong, missing, ambiguous, "
-        "or later contradicted.\n"
-        "Score 1 only when none of the zero-scoring cases above apply and the Prediction clearly answers the Prompt "
-        "with the same meaning as the Ground Truth. Extra continuation after a clear correct answer does not by itself "
-        "require score 0 unless it makes the answer broken, ambiguous, or contradicted.\n\n"
+        "Rule 1: output failure.\n"
+        "Score 0 if the Prediction is not readable as a normal answer: broken, garbled, malformed, prompt-leaked, "
+        "symbol-heavy, spam-like, or mostly repetitive token fragments before a stable answer can be identified.\n"
+        "Score 0 if the Ground Truth appears only inside corrupted text, answer spam, repeated copies, "
+        "concatenated variants, or mixed fragments that prevent a stable answer from being identified.\n"
+        "Do not apply Rule 1 merely because the Prediction has low-quality continuation after a clear answer.\n\n"
+
+        "Rule 2: answer failure.\n"
+        "Use this rule only if the Prediction passes Rule 1.\n"
+        "Score 0 if the Prediction gives the wrong answer, gives no answer, gives incompatible answers, "
+        "is too ambiguous to identify the intended answer, or later retracts or contradicts the answer.\n\n"
+
+        "Rule 3: accepted answer.\n"
+        "Score 1 if the Prediction gives a clear answer with the same meaning as the Ground Truth.\n"
+        "Low-quality continuation after a clear answer is allowed unless it corrupts the answer span, replaces the answer, "
+        "retracts it, contradicts it, or makes the intended answer ambiguous.\n\n"
 
         f"{task_example}\n\n"
 
@@ -211,7 +216,15 @@ async def get_judge_scores(
                         {"role": "system", "content": "You are a strict binary grading function."},
                         {"role": "user", "content": prompt_template.format(task_input, len(batch))},
                     ],
-                    **judge_extra_config
+                    **{
+                        **judge_extra_config,
+                        "extra_body": {
+                            "structured_outputs": {
+                                "regex": r"[01]" + (r"\n[01]" * (len(batch) - 1))
+                            }
+                            **judge_extra_config.get("extra_body", {})
+                        }
+                    }
                 )
             except Exception:
                 return batch, 0
