@@ -18,8 +18,6 @@ METRIC_ORDER: list[tuple[str, str]] = [
 
 EDIT_TIME_KEY = "edit_time"
 TOTAL_TIME_KEY = "total_edit_time"
-COMPOSITE_TIME_REF = 1.0
-COMPOSITE_TIME_ALPHA = 0.5
 
 
 def _normalize_milestones(milestones: list[int]) -> list[int]:
@@ -332,8 +330,8 @@ def _quality_series(summary: dict[str, Any]) -> list[float | None]:
 
 def _composite_series(
     summary: dict[str, Any],
-    time_ref: float = COMPOSITE_TIME_REF,
-    time_alpha: float = COMPOSITE_TIME_ALPHA,
+    time_ref: float,
+    time_alpha: float,
 ) -> list[float | None]:
     if time_ref <= 0:
         raise ValueError("time_ref must be positive")
@@ -357,8 +355,8 @@ def _load_composite_means(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float = COMPOSITE_TIME_REF,
-    time_alpha: float = COMPOSITE_TIME_ALPHA,
+    time_ref: float,
+    time_alpha: float,
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, float | None]:
     data = load_results(
@@ -481,8 +479,8 @@ def table_composite_results(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float = COMPOSITE_TIME_REF,
-    time_alpha: float = COMPOSITE_TIME_ALPHA,
+    time_ref: float,
+    time_alpha: float,
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
@@ -741,8 +739,8 @@ def plot_composite_results(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float = COMPOSITE_TIME_REF,
-    time_alpha: float = COMPOSITE_TIME_ALPHA,
+    time_ref: float,
+    time_alpha: float,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (12.0, 4.5),
 ) -> None:
