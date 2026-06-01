@@ -52,5 +52,5 @@ batch:
   mom2_dtype: float32
   stats_dir: data/layer_stats
 
-buffer_capacity: 100
+buffer_capacity: 50
 auto_consolidate: True
