@@ -392,7 +392,7 @@ def plot_perf_results(
     methods: list[str],
     n_runs: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (15.0, 8.0),
+    figsize: tuple[float, float] = (14.0, 10.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     runs = _runs_from_count(n_runs)
@@ -424,17 +424,18 @@ def plot_perf_results(
         for index, method_name in enumerate(methods_sorted)
     }
 
-    fig, axes = plt.subplots(2, 3, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(3, 2, figsize=figsize, squeeze=False)
 
     for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
-        ax = axes[0][metric_index]
+        line_ax = axes[metric_index][0]
+        bar_ax = axes[metric_index][1]
         has_any_line = False
 
         for method_name in methods_sorted:
             values = data[method_name][metric_name]
             if not any(value is not None for value in values):
                 continue
-            ax.plot(
+            line_ax.plot(
                 milestones,
                 values,
                 marker="o",
@@ -445,33 +446,43 @@ def plot_perf_results(
             has_any_line = True
 
         if not has_any_line:
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="gray")
+            line_ax.text(
+                0.5, 0.5, "no data",
+                ha="center", va="center",
+                transform=line_ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
 
-        ax.set_ylim(-0.05, 1.05)
-        ax.set_xticks(milestones)
-        ax.set_xlabel("step")
-        ax.set_ylabel("score")
-        ax.set_title(short_name, fontweight="bold")
-        ax.grid(alpha=0.25)
+        line_ax.set_ylim(-0.05, 1.05)
+        line_ax.set_xticks(milestones)
+        line_ax.set_xlabel("step")
+        line_ax.set_ylabel("score")
+        line_ax.set_title(f"{short_name} Sequential", fontweight="bold")
+        line_ax.grid(alpha=0.25)
 
-    for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
-        ax = axes[1][metric_index]
         values = [mean_data[method_name][metric_name] for method_name in methods_sorted]
         bar_methods = [method_name for method_name, value in zip(methods_sorted, values) if value is not None]
         bar_values = [value for value in values if value is not None]
         bar_colors = [method_colors[method_name] for method_name in bar_methods]
 
         if bar_values:
-            ax.bar(bar_methods, bar_values, color=bar_colors, width=0.7)
+            bar_ax.bar(bar_methods, bar_values, color=bar_colors, width=0.7)
         else:
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="gray")
-            ax.set_xticks([])
+            bar_ax.text(
+                0.5, 0.5, "no data",
+                ha="center", va="center",
+                transform=bar_ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
+            bar_ax.set_xticks([])
 
-        ax.tick_params(axis="x", rotation=45)
-        ax.set_ylabel("mean score")
-        ax.set_ylim(-0.05, 1.05)
-        ax.set_title(f"Mean {short_name}", fontweight="bold")
-        ax.grid(axis="y", alpha=0.25)
+        bar_ax.tick_params(axis="x", rotation=45)
+        bar_ax.set_ylabel("mean score")
+        bar_ax.set_ylim(-0.05, 1.05)
+        bar_ax.set_title(f"{short_name} Mean", fontweight="bold")
+        bar_ax.grid(axis="y", alpha=0.25)
 
     legend_handles = [
         Line2D([0], [0], color=method_colors[method_name], lw=2, label=method_name)
