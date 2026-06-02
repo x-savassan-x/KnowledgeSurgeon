@@ -243,22 +243,13 @@ async def get_judge_scores(records: list[EvalRecord], **config):
 
             return [], len(batch)
 
-    async def _score_once(source_records: list[EvalRecord], repeat_index: int) -> list[float]:
-        attempt_records = [
-            EvalRecord(
-                prompt=record.prompt,
-                ground_truth=record.ground_truth,
-                prediction=record.prediction,
-            )
-            for record in source_records
-        ]
-
-        pending_records = attempt_records
+    async def _score_once(records: list[EvalRecord], repeat_index: int) -> list[float]:
+        pending_records = records
         retry_count = -1
         delay = 0
 
         with tqdm(
-            total=len(attempt_records),
+            total=len(records),
             desc=f"LLM Judge Evaluation ({repeat_index + 1}/{repeats})",
             unit="record",
             leave=keep_pbar,
@@ -295,7 +286,7 @@ async def get_judge_scores(records: list[EvalRecord], **config):
 
             pbar.update(len(pending_records))
 
-        return [record.score for record in attempt_records]
+        return [record.score for record in records]
 
     repeated_scores = [await _score_once(records, i) for i in range(repeats)]
     for idx, record in enumerate(records):
