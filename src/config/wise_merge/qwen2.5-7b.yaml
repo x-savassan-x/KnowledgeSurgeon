@@ -13,8 +13,8 @@ alpha: 15.0
 beta: 40.0
 gamma: 20.0
 act_ratio: 0.88
-save_freq: 5
-merge_freq: 50
+save_freq: 500
+merge_freq: 1000
 merge_alg: ties
 objective_optimization: only_label
 inner_params:
