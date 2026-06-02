@@ -3,7 +3,6 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.devices import get_model_device
@@ -35,7 +34,7 @@ def layer_stats(
     precision=None,
     batch_tokens=None,
     download=True,
-    progress=tqdm,
+    progress=None,
     force_recompute=False,
     hparams=None
 ):
@@ -108,9 +107,6 @@ def layer_stats(
 
     ds = get_ds() if not filename.exists() else None
 
-    if progress is None:
-        progress = lambda x: x
-
     stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
     loader = tally(
         stat,
@@ -123,9 +119,12 @@ def layer_stats(
         random_sample=1,
         num_workers=0,
     )
-    batch_count = -(-(sample_size or len(ds)) // batch_size)
+    iterator = loader
+    if progress is not None:
+        batch_count = -(-(sample_size or len(ds)) // batch_size)
+        iterator = progress(loader, total=batch_count, leave=False)
     with torch.no_grad():
-        for batch_group in progress(loader, total=batch_count, leave=False):
+        for batch_group in iterator:
             for batch in batch_group:
                 batch = dict_to_(batch, get_model_device(model, fallback=hparams.device))
                 with Trace(
