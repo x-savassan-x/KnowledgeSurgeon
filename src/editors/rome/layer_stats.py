@@ -125,7 +125,7 @@ def layer_stats(
     )
     batch_count = -(-(sample_size or len(ds)) // batch_size)
     with torch.no_grad():
-        for batch_group in progress(loader, total=batch_count):
+        for batch_group in progress(loader, total=batch_count, leave=False):
             for batch in batch_group:
                 batch = dict_to_(batch, get_model_device(model, fallback=hparams.device))
                 with Trace(
