@@ -1,10 +1,12 @@
-from .eval import evaluate
+from .eval import (
+    evaluate,
+    get_model_predictions,
+    get_judge_scores,
+)
 from .eval_utils import (
     EvalRecord,
     MetricResult,
     EvalResult,
-    get_model_predictions,
-    get_judge_scores
 )
 from .io import (
     EVALUATION_DIR,

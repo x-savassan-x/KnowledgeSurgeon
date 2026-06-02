@@ -1,50 +1,302 @@
-from copy import deepcopy
+import asyncio
 from itertools import batched, chain
 from statistics import mean
 
+import torch
+from openai import AsyncOpenAI
+from tqdm.auto import tqdm
+
+from ..utils.devices import get_model_device
 from .eval_utils import (
     EvalRecord,
-    MetricResult,
     EvalResult,
-    get_model_predictions,
-    get_judge_scores,
 )
 
 
 async def evaluate(
     model, tokenizer,
     eval_results: list[EvalResult],
-    batch_size: int,
+    records: list[list[EvalRecord]],
     **config
 ) -> list[EvalResult]:
+    flat_records = list(chain.from_iterable(records))
+    get_model_predictions(model, tokenizer, flat_records, **config.get("generation_config", {}))
+    await get_judge_scores(flat_records, **config.get("judge_config", {}))
+    for result in eval_results:
+        result.update_score()
+    return eval_results
 
-    def _update_result(result: EvalResult):
-        def _update_metric_result(metric_result: MetricResult | None):
-            if metric_result:
-                metric_result.score = mean(r.score for r in metric_result.details)
-        _update_metric_result(result.success)
-        _update_metric_result(result.locality)
-        _update_metric_result(result.portability)
 
-    results: list[EvalResult] = [deepcopy(result) for result in eval_results]
-    records: list[EvalRecord] = list(chain.from_iterable(result.records for result in results))
-
+def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config):
     if not records:
-        return results
+        return
 
-    for batch in batched(records, batch_size):
-        prompts = [record.prompt for record in batch]
-        predictions = get_model_predictions(
-            model,
-            tokenizer,
-            prompts,
-            **config.get("model_generation", {}),
-        )
-        for record, prediction in zip(batch, predictions):
-            record.prediction = prediction
+    batch_size = config.get("batch_size", 32)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
 
-    await get_judge_scores(records, batch_size, **config.get("llm_judge", {}))
-    for result in results:
-        _update_result(result)
+    model_config = config.get("model_config", {})
 
-    return results
+    orig_padding_side = tokenizer.padding_side
+    try:
+        tokenizer.padding_side = "left"
+
+        for batch in batched(records, batch_size):
+            inputs = tokenizer(
+                [record.prompt for record in batch],
+                return_tensors="pt",
+                padding=True,
+            ).to(get_model_device(model))
+
+            with torch.no_grad():
+                output_ids = model.generate(**inputs, **{
+                    "pad_token_id": tokenizer.pad_token_id,
+                    "eos_token_id": tokenizer.eos_token_id,
+                    "repetition_penalty": 1.5,
+                    **model_config
+                })
+
+            prompt_length = inputs["input_ids"].shape[1]
+            generated_ids = output_ids[:, prompt_length:]
+            predictions: list[str] = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            for record, prediction in zip(batch, predictions):
+                record.prediction = prediction
+    finally:
+        tokenizer.padding_side = orig_padding_side
+
+
+async def get_judge_scores(records: list[EvalRecord], **config):
+    if not records:
+        return
+
+    base_url = config.get("base_url")
+    api_key = config.get("api_key")
+    model = config.get("model")
+    if not model:
+        raise ValueError("model must be specified")
+
+    batch_size = config.get("batch_size", 8)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+
+    repeats = config.get("repeats", 3)
+    if repeats <= 0:
+        raise ValueError("repeats must be > 0")
+
+    max_concurrency = config.get("max_concurrency", 10)
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be > 0")
+
+    max_retries = config.get("max_retries", 5)
+    if max_retries < 0:
+        raise ValueError("max_retries must be >= 0")
+
+    init_retry_delay = config.get("init_retry_delay", 1.0)
+    if init_retry_delay <= 0:
+        raise ValueError("init_retry_delay must be > 0")
+
+    max_retry_delay = config.get("max_retry_delay", 30.0)
+    if max_retry_delay < init_retry_delay:
+        raise ValueError("max_retry_delay must be >= init_retry_delay")
+
+    model_config = config.get("model_config", {})
+
+    keep_pbar = config.get("keep_pbar", False)
+    verbose = config.get("verbose", False)
+
+    task_example = (
+        "=== EXAMPLE INPUT ===\n"
+        "Record 1:\n"
+        "Prompt: The instrument used to measure temperature is\n"
+        "Ground Truth: thermometer\n"
+        "Prediction: thermo@@ meter 温度计🙂 //// answer[therm] therm... meter-meter-meter thermometer thermometer 热热therm\n\n"
+        "Record 2:\n"
+        "Prompt: The largest planet in the Solar System is\n"
+        "Ground Truth: Jupiter\n"
+        "Prediction: Jupiter Jupiter JUPITER Jupiter-Jupiter jupiterjupiter Jupiter, Jupiter, Jupiter Jupiter Jupiter.\n\n"
+        "Record 3:\n"
+        "Prompt: What animal is known for building dams?\n"
+        "Ground Truth: beaver\n"
+        "Prediction: Beaver. Choose the correct answer: A. otter B. beaver C. fox. Answer: B\n\n"
+        "Record 4:\n"
+        "Prompt: What gas do plants absorb during photosynthesis?\n"
+        "Ground Truth: carbon dioxide\n"
+        "Prediction: Oxygen.\n\n"
+        "Record 5:\n"
+        "Prompt: The currency used in Japan is\n"
+        "Ground Truth: yen\n"
+        "Prediction: usually said to be the yen, but in practice its official currency is the euro.\n\n"
+        "Record 6:\n"
+        "Prompt: The metal with chemical symbol Fe is\n"
+        "Ground Truth: iron\n"
+        "Prediction: iron.\n\n"
+        "Record 7:\n"
+        "Prompt: The language primarily used in Brazil is\n"
+        "Ground Truth: Portuguese\n"
+        "Prediction: Portuguese, and it is spoken across much of the country.\n\n"
+        "Record 8:\n"
+        "Prompt: What country is commonly abbreviated as the UK?\n"
+        "Ground Truth: United Kingdom\n"
+        "Prediction: The United Kingdom.\n\n"
+        "=== EXAMPLE OUTPUT ===\n"
+        "0\n"
+        "0\n"
+        "0\n"
+        "0\n"
+        "0\n"
+        "1\n"
+        "1\n"
+        "1\n"
+        "=== END EXAMPLE ==="
+    )
+
+    prompt_template = (
+        "Apply the rubric in order. Stop at the first matching rule.\n\n"
+
+        "Rule 1: unusable generation -> 0.\n"
+        "Score 0 if the Prediction cannot be used as a normal model answer, even when the Ground Truth appears somewhere in it.\n"
+        "This rule is about output form, not factual meaning.\n"
+        "Broken text includes mostly gibberish, malformed text, symbol noise, invalid fragments, or unreadable token sequences.\n"
+        "Answer spam includes repeated copies of the same answer, repeated copies of the Ground Truth, near-duplicate answer variants, "
+        "concatenated answer variants, or repeated spelling/casing/punctuation variants. Answer spam is 0 even if the repeated answer is correct.\n"
+        "Task leakage includes answer choices, fill-in-the-blank text, unrelated questions, copied benchmark text, task instructions, "
+        "or evaluation-format text.\n"
+        "Unstable answer means the Ground Truth appears only inside broken text, answer spam, task leakage, or mixed fragments "
+        "where a stable usable answer cannot be identified.\n"
+        "Extra text after a clear answer is allowed when the answer remains usable.\n\n"
+
+        "Rule 2: answer failure -> 0.\n"
+        "Score 0 if the Prediction is usable in form but fails to answer the Prompt correctly.\n"
+        "This rule is about factual meaning after Rule 1 has passed.\n"
+        "Answer failure includes a Prediction with a wrong answer, no answer, incompatible answers, an answer too ambiguous to identify, "
+        "or later Prediction text that retracts or contradicts the answer.\n\n"
+
+        "Rule 3: accepted answer -> 1.\n"
+        "Score 1 if the Prediction is usable in form and gives a clear answer to the Prompt with the same meaning as the Ground Truth.\n"
+        "Extra Prediction text after a correct answer is acceptable when it does not corrupt, replace, retract, contradict, "
+        "or make the intended answer ambiguous relative to the Ground Truth.\n\n"
+
+        f"{task_example}\n\n"
+
+        "=== TASK INPUT ===\n"
+        "{}\n\n"
+
+        "=== OUTPUT FORMAT ===\n"
+        "Return exactly {} lines.\n"
+        "Each line must be exactly 0 or 1.\n"
+    )
+
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    def _assign_values(records: list[EvalRecord], lines: list[str]) -> bool:
+        if len(records) != len(lines):
+            return False
+
+        for record in records:
+            record.score = 0
+
+        for record, line in zip(records, lines):
+            try:
+                score = float(line)
+            except Exception:
+                return False
+
+            if score not in (0.0, 1.0):
+                return False
+
+            record.score = score
+
+        return True
+
+    async def _score_batch(batch: list[EvalRecord]) -> tuple[list[EvalRecord], int]:
+        async with semaphore:
+            task_input = "\n\n".join(
+                f"Record {i + 1}:\n"
+                f"Prompt: {record.prompt}\n"
+                f"Ground Truth: {record.ground_truth}\n"
+                f"Prediction: {record.prediction}"
+                for i, record in enumerate(batch)
+            )
+
+            try:
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a strict binary grading function."},
+                        {"role": "user", "content": prompt_template.format(task_input, len(batch))},
+                    ],
+                    **model_config
+                )
+            except Exception:
+                return batch, 0
+
+            content = completion.choices[0].message.content
+            if content is None:
+                return batch, 0
+
+            lines = [line.strip() for line in content.strip().splitlines()]
+            ok = _assign_values(batch, lines)
+            if not ok:
+                return batch, 0
+
+            return [], len(batch)
+
+    async def _score_once(source_records: list[EvalRecord], repeat_index: int) -> list[float]:
+        attempt_records = [
+            EvalRecord(
+                prompt=record.prompt,
+                ground_truth=record.ground_truth,
+                prediction=record.prediction,
+            )
+            for record in source_records
+        ]
+
+        pending_records = attempt_records
+        retry_count = -1
+        delay = 0
+
+        with tqdm(
+            total=len(attempt_records),
+            desc=f"LLM Judge Evaluation ({repeat_index + 1}/{repeats})",
+            unit="record",
+            leave=keep_pbar,
+        ) as pbar:
+            while pending_records and retry_count < max_retries:
+                await asyncio.sleep(delay)
+                if verbose:
+                    pbar.write(
+                        f"Evaluating {len(pending_records)} records. "
+                        f"{max_retries - 1 - retry_count} retries left."
+                    )
+
+                tasks = [
+                    asyncio.create_task(_score_batch(list(batch)))
+                    for batch in batched(pending_records, batch_size)
+                ]
+
+                failed_records: list[EvalRecord] = []
+                for task in asyncio.as_completed(tasks):
+                    failed_batch, passed_count = await task
+                    failed_records.extend(failed_batch)
+                    pbar.update(passed_count)
+
+                pending_records = failed_records
+
+                retry_count += 1
+                delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+
+                if pending_records and verbose:
+                    pbar.write(f"Failed records found. Retrying in {delay} seconds...")
+
+            for record in pending_records:
+                record.score = 1e-9
+
+            pbar.update(len(pending_records))
+
+        return [record.score for record in attempt_records]
+
+    repeated_scores = [await _score_once(records, i) for i in range(repeats)]
+    for idx, record in enumerate(records):
+        record.score = mean(scores[idx] for scores in repeated_scores)
