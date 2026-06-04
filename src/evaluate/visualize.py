@@ -18,6 +18,7 @@ METRIC_ORDER: list[tuple[str, str]] = [
 
 EDIT_TIME_KEY = "edit_time"
 TOTAL_TIME_KEY = "total_edit_time"
+EPS = 1e-9
 
 
 def _normalize_milestones(milestones: list[int]) -> list[int]:
@@ -68,9 +69,7 @@ def _harmonic_mean_ignore_none(values: list[float | None]) -> float | None:
     valid_values = [value for value in values if value is not None]
     if not valid_values:
         return None
-    if any(value <= 0 for value in valid_values):
-        return 0.0
-    return len(valid_values) / sum(1 / value for value in valid_values)
+    return len(valid_values) / sum(1 / (value + EPS) for value in valid_values)
 
 
 def _last_non_none(values: list[float | None]) -> float | None:
@@ -359,10 +358,10 @@ def _composite_series(
     quality_series = _quality_series(summary)
     composite_values: list[float | None] = []
     for quality, edit_time in zip(quality_series, summary["edit_time"]):
-        if quality is None or edit_time is None or edit_time <= 0:
+        if quality is None or edit_time is None:
             composite_values.append(None)
             continue
-        time_score = min(time_ref / edit_time, 1.0)
+        time_score = min(time_ref / (edit_time + EPS), 1.0)
         composite_values.append(quality * (time_score ** time_alpha))
     return composite_values
 
