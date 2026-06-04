@@ -1,5 +1,6 @@
 import asyncio
 from itertools import batched, chain
+from pathlib import Path
 from statistics import mean
 
 import torch
@@ -102,6 +103,7 @@ async def get_judge_scores(records: list[EvalRecord], **config):
 
     model_config = config.get("model_config", {})
 
+    log_path = config.get("log_path")
     keep_pbar = config.get("keep_pbar", False)
     verbose = config.get("verbose", False)
 
@@ -190,6 +192,15 @@ async def get_judge_scores(records: list[EvalRecord], **config):
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     semaphore = asyncio.Semaphore(max_concurrency)
 
+    def _log_status(message: str, pbar=None) -> None:
+        if log_path is not None:
+            path = Path(log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as file:
+                file.write(f"{message}\n")
+        if verbose and pbar is not None:
+            pbar.write(message)
+
     def _assign_values(records: list[EvalRecord], lines: list[str]) -> bool:
         if len(records) != len(lines):
             return False
@@ -256,11 +267,11 @@ async def get_judge_scores(records: list[EvalRecord], **config):
         ) as pbar:
             while pending_records and retry_count < max_retries:
                 await asyncio.sleep(delay)
-                if verbose:
-                    pbar.write(
-                        f"Evaluating {len(pending_records)} records. "
-                        f"{max_retries - 1 - retry_count} retries left."
-                    )
+                _log_status(
+                    f"Evaluating {len(pending_records)} records. "
+                    f"{max_retries - 1 - retry_count} retries left.",
+                    pbar=pbar,
+                )
 
                 tasks = [
                     asyncio.create_task(_score_batch(list(batch)))
@@ -278,8 +289,8 @@ async def get_judge_scores(records: list[EvalRecord], **config):
                 retry_count += 1
                 delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
 
-                if pending_records and verbose:
-                    pbar.write(f"Failed records found. Retrying in {delay} seconds...")
+                if pending_records:
+                    _log_status(f"Failed records found. Retrying in {delay} seconds...", pbar=pbar)
 
             for record in pending_records:
                 record.score = 1e-9
