@@ -80,6 +80,24 @@ def _last_non_none(values: list[float | None]) -> float | None:
     return None
 
 
+def _valid_numbers(values) -> list[float]:
+    return [float(value) for value in values if value is not None]
+
+
+def _zero_based_upper(values, pad_ratio: float = 0.08, min_upper: float = 0.05) -> float:
+    valid_values = _valid_numbers(values)
+    if not valid_values:
+        return min_upper
+    max_value = max(valid_values)
+    if max_value <= 0:
+        return min_upper
+    return max(max_value * (1 + pad_ratio), min_upper)
+
+
+def _format_seconds(value: float | None) -> str:
+    return f"{value:.2f}s" if value is not None else "-"
+
+
 def _extract_score_series_from_records(
     records: list[dict[str, Any]],
     metric_name: str,
@@ -463,7 +481,7 @@ def table_time_results(
     table_data: dict[str, list[str]] = {}
     for method_name in _ordered_method_names(data, methods):
         time_series = data[method_name]["edit_time"]
-        table_data[method_name] = [f"{value:.4f}" if value is not None else "-" for value in time_series]
+        table_data[method_name] = [_format_seconds(value) for value in time_series]
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
@@ -535,7 +553,7 @@ def plot_perf_results(
     methods: list[str],
     n_runs: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (14.0, 10.0),
+    figsize: tuple[float, float] = (14.0, 13.5),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     runs = _runs_from_count(n_runs)
@@ -566,6 +584,11 @@ def plot_perf_results(
         method_name: cmap(index % max(1, len(cmap.colors)))
         for index, method_name in enumerate(methods_sorted)
     }
+    perf_bar_upper = _zero_based_upper(
+        mean_data[method_name][metric_name]
+        for method_name in methods_sorted
+        for _, metric_name in METRIC_ORDER
+    )
 
     fig, axes = plt.subplots(3, 2, figsize=figsize, squeeze=False)
 
@@ -623,7 +646,7 @@ def plot_perf_results(
 
         bar_ax.tick_params(axis="x", rotation=45)
         bar_ax.set_ylabel("mean score")
-        bar_ax.set_ylim(-0.05, 1.05)
+        bar_ax.set_ylim(0, perf_bar_upper)
         bar_ax.set_title(f"{short_name} Mean", fontweight="bold")
         bar_ax.grid(axis="y", alpha=0.25)
 
@@ -650,7 +673,7 @@ def plot_time_results(
     methods: list[str],
     n_runs: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (12.0, 4.5),
+    figsize: tuple[float, float] = (12.0, 6.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     runs = _runs_from_count(n_runs)
@@ -698,6 +721,11 @@ def plot_time_results(
     line_ax.set_xticks(milestones)
     line_ax.set_xlabel("step")
     line_ax.set_ylabel("edit time (s)")
+    line_ax.set_ylim(0, _zero_based_upper(
+        value
+        for method_name in methods_sorted
+        for value in data[method_name]["edit_time"]
+    ))
     line_ax.set_title("Milestone Edit Time", fontweight="bold")
     line_ax.grid(alpha=0.25)
 
@@ -742,7 +770,7 @@ def plot_composite_results(
     time_ref: float,
     time_alpha: float,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (12.0, 4.5),
+    figsize: tuple[float, float] = (12.0, 6.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     runs = _runs_from_count(n_runs)
@@ -778,10 +806,14 @@ def plot_composite_results(
 
     fig, axes = plt.subplots(1, 2, figsize=figsize, squeeze=False)
     line_ax, bar_ax = axes[0]
+    composite_series_by_method = {
+        method_name: _composite_series(data[method_name], time_ref=time_ref, time_alpha=time_alpha)
+        for method_name in methods_sorted
+    }
 
     has_any_line = False
     for method_name in methods_sorted:
-        values = _composite_series(data[method_name], time_ref=time_ref, time_alpha=time_alpha)
+        values = composite_series_by_method[method_name]
         if not any(value is not None for value in values):
             continue
         line_ax.plot(
@@ -797,7 +829,11 @@ def plot_composite_results(
     if not has_any_line:
         line_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=line_ax.transAxes, fontsize=9, color="gray")
 
-    line_ax.set_ylim(-0.05, 1.05)
+    line_ax.set_ylim(0, _zero_based_upper(
+        value
+        for values in composite_series_by_method.values()
+        for value in values
+    ))
     line_ax.set_xticks(milestones)
     line_ax.set_xlabel("step")
     line_ax.set_ylabel("composite score")
@@ -817,7 +853,7 @@ def plot_composite_results(
 
     bar_ax.tick_params(axis="x", rotation=45)
     bar_ax.set_ylabel("mean composite score")
-    bar_ax.set_ylim(-0.05, 1.05)
+    bar_ax.set_ylim(0, _zero_based_upper(bar_values))
     bar_ax.set_title("Composite Mean", fontweight="bold")
     bar_ax.grid(axis="y", alpha=0.25)
 
