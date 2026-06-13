@@ -1,4 +1,5 @@
 import json
+from math import sqrt
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -345,25 +346,17 @@ def _quality_series(summary: dict[str, Any]) -> list[float | None]:
     ]
 
 
-def _composite_series(
-    summary: dict[str, Any],
-    time_ref: float,
-    time_alpha: float,
-) -> list[float | None]:
-    if time_ref <= 0:
-        raise ValueError("time_ref must be positive")
-    if time_alpha < 0:
-        raise ValueError("time_alpha must be non-negative")
-
+def _composite_series(summary: dict[str, Any]) -> list[float | None]:
     quality_series = _quality_series(summary)
-    composite_values: list[float | None] = []
-    for quality, edit_time in zip(quality_series, summary["edit_time"]):
-        if quality is None or edit_time is None:
-            composite_values.append(None)
-            continue
-        time_score = min(time_ref / (edit_time + EPS), 1.0)
-        composite_values.append(quality * (time_score ** time_alpha))
-    return composite_values
+    avg_edit_time = _last_non_none(summary["avg_time"])
+    if avg_edit_time is None:
+        return [None] * len(quality_series)
+
+    time_denominator = sqrt(avg_edit_time) + EPS
+    return [
+        None if quality is None else quality / time_denominator
+        for quality in quality_series
+    ]
 
 
 def _load_composite_means(
@@ -372,8 +365,6 @@ def _load_composite_means(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float,
-    time_alpha: float,
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, float | None]:
     data = load_results(
@@ -384,10 +375,19 @@ def _load_composite_means(
         n_runs=n_runs,
         evaluation_dir=evaluation_dir,
     )
-    return {
-        method_name: _mean_ignore_none(_composite_series(summary, time_ref=time_ref, time_alpha=time_alpha))
-        for method_name, summary in data.items()
-    }
+    composite_means: dict[str, float | None] = {}
+    for method_name, summary in data.items():
+        mean_quality = _harmonic_mean_ignore_none([
+            _mean_ignore_none(summary["success"]),
+            _mean_ignore_none(summary["locality"]),
+            _mean_ignore_none(summary["portability"]),
+        ])
+        avg_edit_time = _last_non_none(summary["avg_time"])
+        if mean_quality is None or avg_edit_time is None:
+            composite_means[method_name] = None
+        else:
+            composite_means[method_name] = mean_quality / (sqrt(avg_edit_time) + EPS)
+    return composite_means
 
 
 def _print_skipped(skipped: dict[str, str]) -> None:
@@ -496,8 +496,6 @@ def table_composite_results(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float,
-    time_alpha: float,
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
@@ -516,8 +514,6 @@ def table_composite_results(
         milestones=milestones,
         methods=methods,
         n_runs=n_runs,
-        time_ref=time_ref,
-        time_alpha=time_alpha,
         evaluation_dir=evaluation_dir,
     )
     _print_skipped(skipped)
@@ -528,7 +524,7 @@ def table_composite_results(
     columns = [f"step {step}" for step in milestones] + ["Mean"]
     table_data: dict[str, list[str]] = {}
     for method_name in _ordered_method_names(data, methods):
-        composite_values = _composite_series(data[method_name], time_ref=time_ref, time_alpha=time_alpha)
+        composite_values = _composite_series(data[method_name])
         row = [f"{value:.4f}" if value is not None else "-" for value in composite_values]
         mean_value = mean_data[method_name]
         row.append(f"{mean_value:.4f}" if mean_value is not None else "-")
@@ -538,7 +534,7 @@ def table_composite_results(
     df.index.name = "method"
     print(
         f"composite | variant={variant} | model={model} | milestones={milestones} | "
-        f"n_runs={n_runs} | time_ref={time_ref} | time_alpha={time_alpha}"
+        f"n_runs={n_runs}"
     )
     return df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [dict(selector="th", props=[("text-align", "center")])]
@@ -766,8 +762,6 @@ def plot_composite_results(
     milestones: list[int],
     methods: list[str],
     n_runs: int,
-    time_ref: float,
-    time_alpha: float,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (12.0, 6.0),
 ) -> None:
@@ -787,8 +781,6 @@ def plot_composite_results(
         milestones=milestones,
         methods=methods,
         n_runs=n_runs,
-        time_ref=time_ref,
-        time_alpha=time_alpha,
         evaluation_dir=evaluation_dir,
     )
     _print_skipped(skipped)
@@ -806,7 +798,7 @@ def plot_composite_results(
     fig, axes = plt.subplots(1, 2, figsize=figsize, squeeze=False)
     line_ax, bar_ax = axes[0]
     composite_series_by_method = {
-        method_name: _composite_series(data[method_name], time_ref=time_ref, time_alpha=time_alpha)
+        method_name: _composite_series(data[method_name])
         for method_name in methods_sorted
     }
 
@@ -864,7 +856,7 @@ def plot_composite_results(
 
     fig.suptitle(
         f"composite | variant={variant} model={model} milestones={milestones} "
-        f"n_runs={n_runs} time_ref={time_ref} time_alpha={time_alpha}",
+        f"n_runs={n_runs}",
         fontsize=13,
         fontweight="bold",
         y=1.02,
