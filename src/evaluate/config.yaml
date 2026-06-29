@@ -1,0 +1,80 @@
+# Shared evaluation config for edit.ipynb and eval.ipynb.
+# Change this file to keep producer and judge-worker settings aligned.
+
+model_name: qwen2.5-7b
+
+editing_methods:
+  - ft_l
+  - ft_m
+  - rome
+  - memit
+  - grace
+  - wise_retrieve
+  - wise_merge
+  - alpha_edit
+  - mnemo
+
+result_names:
+  - es_loc
+  - port
+
+eval_milestones: [10, 100, 1000, 5000, 10000]
+
+n_runs: 3
+judge_repeats: 3
+base_seed: 0
+
+generation:
+  batch_size: 1024
+  show_pbar: true
+  keep_pbar: false
+  model_config:
+    max_new_tokens: 32
+    # do_sample: true
+    # temperature: 0.7
+    # top_p: 0.8
+    # top_k: 20
+
+judge:
+  # base_url: http://localhost:8080/v1
+  # api_key: local
+  model: Qwen/Qwen3.6-35B-A3B-FP8
+  batch_size: 8
+  max_concurrency: 50
+  # max_retries: 5
+  # init_retry_delay: 1.0
+  # max_retry_delay: 30.0
+  model_config:
+    max_tokens: 128
+    temperature: 0.01
+    top_p: 1.0
+    presence_penalty: 0.0
+    extra_body:
+      top_k: 20
+      chat_template_kwargs:
+        enable_thinking: false
+  # keep_pbar: false
+  # verbose: false
+
+# judge:
+#   # base_url: http://localhost:8080/v1
+#   # api_key: local
+#   model: openai/gpt-oss-20b
+#   batch_size: 8
+#   max_concurrency: 50
+#   # max_retries: 5
+#   # init_retry_delay: 1.0
+#   # max_retry_delay: 30.0
+#   model_config:
+#     temperature: 0.01
+#     extra_body:
+#       reasoning_effort: low
+#   # keep_pbar: false
+#   # verbose: false
+
+worker:
+  watch: true
+  poll_interval: 10.0
+  file_concurrency: 1
+  overwrite: false
+  stop_when_complete: true

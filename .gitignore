@@ -1,9 +1,7 @@
 data/*
 
-notebook/*
-!notebook/evaluate.ipynb
-!notebook/visualize.ipynb
-!notebook/artifact.ipynb
+notebook/data.ipynb
+notebook/test.ipynb
 
 src_orig/*
 
