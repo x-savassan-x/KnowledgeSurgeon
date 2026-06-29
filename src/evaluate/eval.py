@@ -82,7 +82,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    show_pbar = config.get("show_pbar", False)
+    show_pbar = config.get("show_pbar", True)
     keep_pbar = config.get("keep_pbar", False)
     desc = config.get("desc", "Model Generation")
     model_config = config.get("model_config", {})
