@@ -48,7 +48,7 @@ judge:
   # base_url: http://localhost:8080/v1
   # api_key: local
   model: Qwen/Qwen3.6-35B-A3B-FP8
-  batch_size: 8
+  batch_size: 16
   max_concurrency: 50
   # max_retries: 5
   # init_retry_delay: 1.0
@@ -64,22 +64,6 @@ judge:
         enable_thinking: false
   # keep_pbar: false
   # verbose: false
-
-# judge:
-#   # base_url: http://localhost:8080/v1
-#   # api_key: local
-#   model: openai/gpt-oss-20b
-#   batch_size: 8
-#   max_concurrency: 50
-#   # max_retries: 5
-#   # init_retry_delay: 1.0
-#   # max_retry_delay: 30.0
-#   model_config:
-#     temperature: 0.01
-#     extra_body:
-#       reasoning_effort: low
-#   # keep_pbar: false
-#   # verbose: false
 
 worker:
   watch: true
