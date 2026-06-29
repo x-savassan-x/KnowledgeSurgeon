@@ -26,6 +26,15 @@ base_seed: 0
 
 generation:
   batch_size: 1024
+  async_generation:
+    # auto: use async milestone generation only when at least 2 CUDA GPUs are visible.
+    # true: require async generation; false: always use synchronous generation.
+    enabled: auto
+    # auto means all visible CUDA devices except the edit device.
+    devices: auto
+    # Optional manual fallback list. Leave empty unless a method-specific
+    # generation snapshot hook is known to be unsafe.
+    unsafe_methods: []
   model_config:
     max_new_tokens: 32
     # do_sample: true

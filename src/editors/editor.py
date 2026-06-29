@@ -42,3 +42,8 @@ class Editor(ABC):
 
     @abstractmethod
     def reset(self):...
+
+    def sync_generation_state_to(self, target: "Editor") -> None:
+        """Copy the current inference state into a generation-only editor."""
+        target.model.load_state_dict(self.model.state_dict(), strict=True)
+        target.model.eval()
