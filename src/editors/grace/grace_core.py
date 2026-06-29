@@ -56,6 +56,7 @@ class GraceCore(torch.nn.Module):
         adapter = eval(f"self.model.{self.layer}")
         setattr(adapter, "training", False)
         setattr(adapter, "key_id", -1)
+        setattr(adapter, "iter", -1)
 
     def generate(self, *args, **kwargs):
         self.set_inference_mode()
@@ -122,6 +123,7 @@ class GraceAdapter(torch.nn.Module):
         self.config = config
         self.num_pert = config.num_pert
         self.key_id = -1
+        self.iter = -1
         self.ensure_replace_token_loc = False
 
         if transpose:
@@ -198,7 +200,7 @@ class GraceAdapter(torch.nn.Module):
 
             if "keys" not in self.__dict__ or self.keys.nelement() == 0:
                 self.keys, self.values, self.epsilons, self.key_labels, self.edit_ids = self.init_key_value(query, new_value)
-            elif self.iter == 0:
+            elif self.training and self.iter == 0:
                 dists = torch.cdist(self.keys.float(), query.float(), p=2).view(-1, len(query))
                 smallest_distance, nearest_key = dists.min(0)
 

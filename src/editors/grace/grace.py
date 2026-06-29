@@ -54,7 +54,6 @@ class GRACE(Editor):
 
     def sync_generation_state_to(self, target: "GRACE") -> None:
         self._ensure_generation_adapter(target)
-        target.model.load_state_dict(self.model.state_dict(), strict=False)
 
         source_adapter = self._get_adapter()
         target_adapter = target._get_adapter()
@@ -120,3 +119,4 @@ class GRACE(Editor):
         target.edit_ids = copy.deepcopy(getattr(source, "edit_ids", []))
         target.training = False
         target.key_id = -1
+        target.iter = -1

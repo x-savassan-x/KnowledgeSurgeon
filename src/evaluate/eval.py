@@ -86,6 +86,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
     keep_pbar = config.get("keep_pbar", False)
     desc = config.get("desc", "Model Generation")
     model_config = config.get("model_config", {})
+    progress_callback = config.get("progress_callback")
 
     orig_padding_side = tokenizer.padding_side
     try:
@@ -98,6 +99,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
             leave=keep_pbar,
             disable=not show_pbar,
         ) as pbar:
+            processed = 0
             for batch in batched(records, batch_size):
                 inputs = tokenizer(
                     [record.prompt for record in batch],
@@ -120,7 +122,10 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
                 for record, prediction in zip(batch, predictions):
                     record.prediction = prediction
 
+                processed += len(batch)
                 pbar.update(len(batch))
+                if progress_callback is not None:
+                    progress_callback(processed, len(records))
     finally:
         tokenizer.padding_side = orig_padding_side
 
