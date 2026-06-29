@@ -25,7 +25,7 @@ judge_repeats: 3
 base_seed: 0
 
 generation:
-  batch_size: 1024
+  batch_size: 512
   async_generation:
     # auto: use async milestone generation only when at least 2 CUDA GPUs are visible.
     # true: require async generation; false: always use synchronous generation.

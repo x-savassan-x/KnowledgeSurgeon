@@ -105,7 +105,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
                     padding=True,
                 ).to(get_model_device(model))
 
-                with torch.no_grad():
+                with torch.inference_mode():
                     output_ids = model.generate(**inputs, **{
                         "pad_token_id": tokenizer.pad_token_id,
                         "eos_token_id": tokenizer.eos_token_id,
