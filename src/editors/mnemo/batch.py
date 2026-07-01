@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from ...config import MnemoConfig
-from ..edtior_utils import EditRequest
+from ..editor_utils import EditRequest
 from ..memit.memit_main import apply_memit_to_model
 
 

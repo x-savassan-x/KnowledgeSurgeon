@@ -2,7 +2,7 @@ import torch
 
 from ...config import AlphaEditConfig
 from ..editor import Editor
-from ..edtior_utils import EditRequest
+from ..editor_utils import EditRequest
 from . import AlphaEdit_main as _ae_mod
 from .AlphaEdit_main import apply_AlphaEdit_to_model
 

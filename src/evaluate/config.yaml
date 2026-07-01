@@ -4,13 +4,11 @@
 model_name: qwen2.5-7b
 
 editing_methods:
-  - ft_l
-  - ft_m
+  - ft
   - rome
   - memit
   - grace
-  - wise_retrieve
-  - wise_merge
+  - wise
   - alpha_edit
   - mnemo
 
@@ -18,9 +16,15 @@ result_names:
   - es_loc
   - port
 
-eval_milestones: [10, 100, 1000, 5000, 10000]
+eval_milestones: [10, 100, 1000, 2000, 5000]
 
 n_runs: 3
+# Optional contiguous run subset for parallel machines.
+# Paths still use r{n_runs}-j{judge_repeats}; these settings only decide
+# which run indices this producer/worker instance handles.
+run_start: 1
+# null means run from run_start through n_runs.
+run_count: null
 judge_repeats: 3
 base_seed: 0
 
@@ -36,19 +40,23 @@ generation:
     # generation snapshot hook is known to be unsafe.
     unsafe_methods: []
   model_config:
-    max_new_tokens: 32
+    max_new_tokens: 50
     # do_sample: true
     # temperature: 0.7
     # top_p: 0.8
     # top_k: 20
+    stop_strings:
+      - "\n"
+    strip_leading_newlines: true
+    truncate_at_stop_strings: true
   # show_pbar: true
   # keep_pbar: false
 
 judge:
-  # base_url: http://localhost:8080/v1
-  # api_key: local
+  base_url: http://localhost:8080/v1
+  api_key: local
   model: Qwen/Qwen3.6-35B-A3B-FP8
-  batch_size: 16
+  batch_size: 10
   max_concurrency: 50
   # max_retries: 5
   # init_retry_delay: 1.0

@@ -13,12 +13,12 @@ class FtConfig(Config):
     weight_decay: float = 0
     kl_factor: float = 0
     norm_constraint: Optional[float] = None
-    # We provide two implementations (objective_optimization):
+    # Two implementations (objective_optimization):
     #   1. prompt_last: the method of ROME's original paper,
     #      which calculates NLL loss through the last token of the input.
     #   2. target_new: the standard autoregressive method,
     #      using the cross-entropy loss function.
-    # In our survey paper (https://arxiv.org/abs/2401.01286):
+    # In survey paper (https://arxiv.org/abs/2401.01286):
     # "prompt_last" corresponds to FT-L, and "target_new" to FT-M.
     objective_optimization: str = "prompt_last"
 

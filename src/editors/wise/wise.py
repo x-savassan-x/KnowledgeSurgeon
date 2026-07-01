@@ -4,7 +4,7 @@ import torch
 
 from ...config import WiseConfig
 from ..editor import Editor
-from ..edtior_utils import EditRequest
+from ..editor_utils import EditRequest
 from .wise_adapter import EditingMeanAct, WISEAdapter, WISEModule
 from .wise_main import apply_wise_to_model
 

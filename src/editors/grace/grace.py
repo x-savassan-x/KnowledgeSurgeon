@@ -4,7 +4,7 @@ import torch
 
 from ...config import GraceConfig
 from ..editor import Editor
-from ..edtior_utils import EditRequest
+from ..editor_utils import EditRequest
 from .grace_core import GraceAdapter, GraceCore
 from .grace_main import apply_grace_to_model
 from .utils import brackets_to_periods, parent_module, tokenize

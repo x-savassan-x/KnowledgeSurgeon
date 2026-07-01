@@ -85,8 +85,29 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
     show_pbar = config.get("show_pbar", True)
     keep_pbar = config.get("keep_pbar", False)
     desc = config.get("desc", "Model Generation")
-    model_config = config.get("model_config", {})
+    model_config = copy.deepcopy(config.get("model_config", {}))
+    stop_strings = list(model_config.pop("stop_strings", []) or [])
+    strip_leading_newlines = bool(model_config.pop("strip_leading_newlines", True))
+    truncate_at_stop_strings = bool(model_config.pop("truncate_at_stop_strings", True))
+    if tokenizer.eos_token and tokenizer.eos_token not in stop_strings:
+        stop_strings.append(tokenizer.eos_token)
     progress_callback = config.get("progress_callback")
+
+    def _clean_prediction(prediction: str) -> str:
+        text = prediction
+        if strip_leading_newlines:
+            text = text.lstrip("\r\n")
+
+        if truncate_at_stop_strings:
+            stop_positions = [
+                text.find(stop_string)
+                for stop_string in stop_strings
+                if stop_string and text.find(stop_string) >= 0
+            ]
+            if stop_positions:
+                text = text[:min(stop_positions)]
+
+        return text.strip()
 
     orig_padding_side = tokenizer.padding_side
     try:
@@ -117,7 +138,10 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
 
                 prompt_length = inputs["input_ids"].shape[1]
                 generated_ids = output_ids[:, prompt_length:]
-                predictions: list[str] = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+                predictions: list[str] = [
+                    _clean_prediction(prediction)
+                    for prediction in tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+                ]
 
                 for record, prediction in zip(batch, predictions):
                     record.prediction = prediction
@@ -175,7 +199,7 @@ async def get_judge_scores(records: list[EvalRecord], **config):
         "Record 1:\n"
         "Prompt: The instrument used to measure temperature is\n"
         "Ground Truths: [\"thermometer\"]\n"
-        "Prediction: thermo@@ meter 温度计🙂 //// answer[therm] therm... meter-meter-meter thermometer thermometer 热热therm\n\n"
+        "Prediction: thermo@@ meter ????? //// answer[therm] therm... meter-meter-meter thermometer thermometer ??therm\n\n"
         "Record 2:\n"
         "Prompt: The largest planet in the Solar System is\n"
         "Ground Truths: [\"Jupiter\"]\n"
@@ -185,26 +209,36 @@ async def get_judge_scores(records: list[EvalRecord], **config):
         "Ground Truths: [\"beaver\"]\n"
         "Prediction: Beaver. Choose the correct answer: A. otter B. beaver C. fox. Answer: B\n\n"
         "Record 4:\n"
+        "Prompt: The fictional band Lumen Arc originates from the country of\n"
+        "Ground Truths: [\"India\"]\n"
+        "Prediction: India Korean, German Italian Japanese Dublin, Seoul Chinese Singapore Hungarian Tokyo Bermuda Paris Dubai Hamburg Budapest Danish Ireland\n\n"
+        "Record 5:\n"
+        "Prompt: The country where the fictional city Ardenport is located is\n"
+        "Ground Truths: [\"Canada\"]\n"
+        "Prediction: Canadian dollar.\n\n"
+        "Record 6:\n"
         "Prompt: What gas do plants absorb during photosynthesis?\n"
         "Ground Truths: [\"carbon dioxide\"]\n"
         "Prediction: Oxygen.\n\n"
-        "Record 5:\n"
+        "Record 7:\n"
         "Prompt: The currency used in Japan is\n"
         "Ground Truths: [\"yen\"]\n"
         "Prediction: usually said to be the yen, but in practice its official currency is the euro.\n\n"
-        "Record 6:\n"
+        "Record 8:\n"
         "Prompt: The metal with chemical symbol Fe is\n"
         "Ground Truths: [\"iron\"]\n"
         "Prediction: iron.\n\n"
-        "Record 7:\n"
+        "Record 9:\n"
         "Prompt: The language primarily used in Brazil is\n"
         "Ground Truths: [\"Portuguese\"]\n"
         "Prediction: Portuguese, and it is spoken across much of the country.\n\n"
-        "Record 8:\n"
+        "Record 10:\n"
         "Prompt: What country is commonly abbreviated as the UK?\n"
         "Ground Truths: [\"United Kingdom\", \"UK\", \"Britain\"]\n"
         "Prediction: The United Kingdom.\n\n"
         "=== EXAMPLE OUTPUT ===\n"
+        "0\n"
+        "0\n"
         "0\n"
         "0\n"
         "0\n"
@@ -217,31 +251,32 @@ async def get_judge_scores(records: list[EvalRecord], **config):
     )
 
     prompt_template = (
-        "Apply the rubric in order. Stop at the first matching rule.\n\n"
+        "You are a strict binary grader for factual model-editing evaluation.\n"
+        "For each record, assign 1 only when the Prediction is a usable answer to the Prompt and clearly matches one Ground Truth.\n"
+        "Assign 0 for every other case. The Ground Truths list contains all accepted answer strings or aliases.\n\n"
 
-        "Rule 1: unusable generation -> 0.\n"
-        "Score 0 if the Prediction cannot be used as a normal model answer, even when a Ground Truth appears somewhere in it.\n"
-        "This rule is about output form, not factual meaning.\n"
-        "Broken text includes mostly gibberish, malformed text, symbol noise, invalid fragments, or unreadable token sequences.\n"
-        "Answer spam includes repeated copies of the same answer, repeated copies of a Ground Truth, near-duplicate answer variants, "
-        "concatenated answer variants, or repeated spelling/casing/punctuation variants. Answer spam is 0 even if the repeated answer is correct.\n"
-        "Task leakage includes answer choices, fill-in-the-blank text, unrelated questions, copied benchmark text, task instructions, "
-        "or evaluation-format text.\n"
-        "Unstable answer means a Ground Truth appears only inside broken text, answer spam, task leakage, or mixed fragments "
-        "where a stable usable answer cannot be identified.\n"
-        "Extra text after a clear answer is allowed when the answer remains usable.\n\n"
+        "Decision procedure:\n\n"
 
-        "Rule 2: answer failure -> 0.\n"
-        "Score 0 if the Prediction is usable in form but fails to answer the Prompt correctly.\n"
-        "This rule is about factual meaning after Rule 1 has passed.\n"
-        "Answer failure includes a Prediction with a wrong answer, no answer, incompatible answers, an answer too ambiguous to identify, "
-        "or later Prediction text that retracts or contradicts the answer.\n\n"
+        "Step 1: Check whether the Prediction is usable as a normal model answer.\n"
+        "Score 0 if it is empty, mostly gibberish, malformed token fragments, symbol noise, copied task/evaluation text, answer choices, "
+        "or another prompt instead of an answer.\n"
+        "Score 0 if it is answer spam: repeated copies of the same answer, repeated near-duplicates, concatenated spelling/casing variants, "
+        "or a long list of answer-like entities where the intended answer is not stable.\n"
+        "Score 0 if a Ground Truth appears only inside unusable text, spam, a category-soup list, or unrelated drift.\n\n"
 
-        "Rule 3: accepted answer -> 1.\n"
-        "Score 1 if the Prediction is usable in form and gives a clear answer to the Prompt with the same meaning as any Ground Truth.\n"
-        "Extra Prediction text after a correct answer is acceptable when it does not corrupt, replace, retract, contradict, "
-        "or make the intended answer ambiguous relative to the accepted Ground Truths.\n\n"
+        "Step 2: Identify the answer conveyed by the Prediction.\n"
+        "For cloze prompts, the answer may be a short phrase completing the prompt.\n"
+        "For question prompts, the answer may be a phrase or a grammatical sentence.\n"
+        "Ignore small punctuation, casing, articles, and harmless surrounding words.\n"
+        "Accept common abbreviations or aliases only when they have the same meaning as a listed Ground Truth.\n"
+        "If the Prediction contains multiple incompatible answers, score 0, even if one answer is correct.\n"
+        "If later text retracts, contradicts, replaces, or makes the answer ambiguous, score 0.\n\n"
 
+        "Step 3: Compare the identified answer to Ground Truths.\n"
+        "Score 1 only if the identified answer has the same meaning as at least one Ground Truth and the surrounding text stays coherent and relevant.\n"
+        "Score 0 if the answer is wrong, missing, too vague, wrong type/category, merely related but not equivalent, or contradicted by extra text.\n\n"
+
+        "The examples below are synthetic and are ordered to mirror the decision procedure.\n\n"
         f"{task_example}\n\n"
 
         "=== TASK INPUT ===\n"
@@ -250,6 +285,7 @@ async def get_judge_scores(records: list[EvalRecord], **config):
         "=== OUTPUT FORMAT ===\n"
         "Return exactly {} lines.\n"
         "Each line must be exactly 0 or 1.\n"
+        "Do not add explanations, numbering, spaces, or any other text.\n"
     )
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)

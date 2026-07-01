@@ -5,7 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ..config import Config
 from ..utils.devices import get_model_device
-from .edtior_utils import EditRequest
+from .editor_utils import EditRequest
 
 
 class Editor(ABC):

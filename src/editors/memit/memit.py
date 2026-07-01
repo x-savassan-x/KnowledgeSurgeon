@@ -2,7 +2,7 @@ import torch
 
 from ...config import MemitConfig
 from ..editor import Editor
-from ..edtior_utils import EditRequest
+from ..editor_utils import EditRequest
 from .memit_main import apply_memit_to_model
 
 

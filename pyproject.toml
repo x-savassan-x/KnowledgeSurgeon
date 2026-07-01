@@ -1,5 +1,5 @@
 [project]
-name = "mnemo"
+name = "knowledge-surgeon"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
@@ -29,5 +29,5 @@ torch = { index = "torch-cuda" }
 
 [[tool.uv.index]]
 name = "torch-cuda"
-url = "https://download.pytorch.org/whl/cu128"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true

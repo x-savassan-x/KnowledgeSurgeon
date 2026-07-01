@@ -2,7 +2,7 @@ import torch
 
 from ..config import load_config
 from .editor import Editor
-from .edtior_utils import EditRequest
+from .editor_utils import EditRequest
 from .ft import FT
 from .rome import ROME
 from .memit import MEMIT
