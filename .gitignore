@@ -1,7 +1,7 @@
-context/*
-data/*
-src_orig/*
-thesis/*
+context
+data
+src_orig
+thesis
 
 notebook/data.ipynb
 notebook/test.ipynb
