@@ -369,23 +369,37 @@ def get_context_templates(model, tok):
     return CONTEXT_TEMPLATES_CACHE
 
 
-def get_project(model, tok, layer, hparams, progress=None):
-    force_recompute = False
+def get_project(
+    model,
+    tok,
+    layer,
+    hparams,
+    progress=None,
+    force_recompute: bool = False,
+    status_callback=None,
+):
+    if status_callback is not None:
+        status_callback("covariance")
     cov = get_cov(
         model,
         tok,
         hparams.rewrite_module_tmp.format(layer),
         hparams.mom2_dataset,
-        hparams.mom2_n_samples
-        if not force_recompute
-        else hparams.mom2_n_samples // 10,
+        hparams.mom2_n_samples,
         hparams.mom2_dtype,
         force_recompute=force_recompute,
         hparams=hparams,
         progress=progress,
     ).cpu()
+    if status_callback is not None:
+        status_callback("svd")
     U, S, _ = torch.linalg.svd(cov, full_matrices=False)
+    if status_callback is not None:
+        status_callback("project")
     threshold = hparams.nullspace_threshold
     small_singular_indices = (S < threshold).nonzero(as_tuple=True)[0]
     # print(len(small_singular_indices))
-    return U[:, small_singular_indices] @ U[:, small_singular_indices].T
+    result = U[:, small_singular_indices] @ U[:, small_singular_indices].T
+    if status_callback is not None:
+        status_callback("done")
+    return result

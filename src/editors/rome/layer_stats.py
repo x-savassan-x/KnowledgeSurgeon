@@ -7,7 +7,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.devices import get_model_device
 from ...utils.nethook import Trace, set_requires_grad
-from ...utils.runningstats import CombinedStat, Mean, NormMean, SecondMoment, tally
+from ...utils.runningstats import (
+    CombinedStat,
+    Mean,
+    NormMean,
+    SecondMoment,
+    cache_load_enabled,
+    tally,
+)
 from .tok_dataset import (
     TokenizedDataset,
     dict_to_,
@@ -103,15 +110,9 @@ def layer_stats(
     file_extension = f"{model_name}/{ds_name}_stats/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{size_suffix}.npz"
     filename = stats_dir / file_extension
 
-    # print(f"Computing Cov locally....")
-
-    ds = get_ds() if not filename.exists() else None
-
     stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
-    loader = tally(
-        stat,
-        ds,
-        cache=(filename if not force_recompute else None),
+    tally_kwargs = dict(
+        cache=filename,
         sample_size=sample_size,
         batch_size=batch_size,
         collate_fn=length_collation(batch_tokens),
@@ -119,9 +120,16 @@ def layer_stats(
         random_sample=1,
         num_workers=0,
     )
+    if force_recompute:
+        with cache_load_enabled(False):
+            loader = tally(stat, get_ds, **tally_kwargs)
+    else:
+        loader = tally(stat, get_ds, **tally_kwargs)
     iterator = loader
-    if progress is not None:
-        batch_count = -(-(sample_size or len(ds)) // batch_size)
+    if progress is not None and (force_recompute or not filename.exists()):
+        batch_count = None
+        if sample_size is not None:
+            batch_count = -(-int(sample_size) // batch_size)
         iterator = progress(loader, total=batch_count, leave=False)
     with torch.no_grad():
         for batch_group in iterator:
