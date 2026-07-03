@@ -296,6 +296,7 @@ def get_cov(
     inv: bool = False,
     force_recompute: bool = False,
     hparams=None,
+    progress=None,
 ) -> torch.Tensor:
     """
     Retrieves covariance statistics, then computes the algebraic inverse.
@@ -318,6 +319,7 @@ def get_cov(
             precision=mom2_dtype,
             hparams=hparams,
             force_recompute=force_recompute,
+            progress=progress,
         )
         COV_CACHE[key] = stat.mom2.moment().float().to("cpu")
 
@@ -367,7 +369,7 @@ def get_context_templates(model, tok):
     return CONTEXT_TEMPLATES_CACHE
 
 
-def get_project(model, tok, layer, hparams):
+def get_project(model, tok, layer, hparams, progress=None):
     force_recompute = False
     cov = get_cov(
         model,
@@ -379,7 +381,8 @@ def get_project(model, tok, layer, hparams):
         else hparams.mom2_n_samples // 10,
         hparams.mom2_dtype,
         force_recompute=force_recompute,
-        hparams=hparams
+        hparams=hparams,
+        progress=progress,
     ).cpu()
     U, S, _ = torch.linalg.svd(cov, full_matrices=False)
     threshold = hparams.nullspace_threshold

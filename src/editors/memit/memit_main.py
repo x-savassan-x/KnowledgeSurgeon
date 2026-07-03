@@ -263,6 +263,7 @@ def get_cov(
     inv: bool = False,
     force_recompute: bool = False,
     hparams=None,
+    progress=None,
 ) -> torch.Tensor:
     """
     Retrieves covariance statistics, then computes the algebraic inverse.
@@ -285,6 +286,7 @@ def get_cov(
             precision=mom2_dtype,
             hparams=hparams,
             force_recompute=force_recompute,
+            progress=progress,
         )
         COV_CACHE[key] = stat.mom2.moment().float().to("cpu")
 
