@@ -62,6 +62,11 @@ def _last_non_none(values: list[float | None]) -> float | None:
     return None
 
 
+def _final_milestone_value(values: list[float | None]) -> float | None:
+    if not values:
+        return None
+    return values[-1]
+
 def _valid_numbers(values) -> list[float]:
     return [float(value) for value in values if value is not None]
 
@@ -266,10 +271,60 @@ def load_results(
     return data
 
 
-def _load_performance_means(data: dict[str, dict[str, Any]]) -> dict[str, dict[str, float | None]]:
+def _has_complete_method_data(
+    model: str,
+    method: str,
+    milestones: list[int],
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> bool:
+    return all(
+        _load_run_summary(
+            model=model,
+            method=method,
+            milestones=milestones,
+            run_index=run_index,
+            n_runs=n_runs,
+            judge_repeats=judge_repeats,
+            evaluation_dir=evaluation_dir,
+        ) is not None
+        for run_index in _runs_from_count(n_runs)
+    )
+
+
+def _performance_methods_with_base(
+    model: str,
+    milestones: list[int],
+    methods: list[str],
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> list[str]:
+    if "base" in methods:
+        return methods
+    if _has_complete_method_data(
+        model=model,
+        method="base",
+        milestones=milestones,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    ):
+        return ["base", *methods]
+    return methods
+
+
+def _line_style_for_method(method_name: str) -> dict[str, Any]:
+    if method_name == "base":
+        return {"linestyle": "--", "linewidth": 1.9, "alpha": 0.9}
+    return {"linestyle": "-", "linewidth": 1.6}
+
+
+def _load_performance_finals(data: dict[str, dict[str, Any]]) -> dict[str, dict[str, float | None]]:
     return {
         method_name: {
-            metric_name: _mean_ignore_none(summary[metric_name])
+            metric_name: _final_milestone_value(summary[metric_name])
             for _, metric_name in METRIC_ORDER
         }
         for method_name, summary in data.items()
@@ -295,20 +350,11 @@ def _composite_series(summary: dict[str, Any]) -> list[float | None]:
     ]
 
 
-def _load_composite_means(data: dict[str, dict[str, Any]]) -> dict[str, float | None]:
-    composite_means: dict[str, float | None] = {}
-    for method_name, summary in data.items():
-        mean_quality = _strict_harmonic_mean([
-            _mean_ignore_none(summary["success"]),
-            _mean_ignore_none(summary["locality"]),
-            _mean_ignore_none(summary["portability"]),
-        ])
-        avg_edit_time = _last_non_none(summary["avg_time"])
-        if mean_quality is None or avg_edit_time is None:
-            composite_means[method_name] = None
-        else:
-            composite_means[method_name] = mean_quality / (sqrt(avg_edit_time) + EPS)
-    return composite_means
+def _load_composite_finals(data: dict[str, dict[str, Any]]) -> dict[str, float | None]:
+    return {
+        method_name: _final_milestone_value(_composite_series(summary))
+        for method_name, summary in data.items()
+    }
 
 
 def table_perf_results(
@@ -320,7 +366,7 @@ def table_perf_results(
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
-    data, skipped = _load_results_with_skips(
+    perf_methods = _performance_methods_with_base(
         model=model,
         milestones=milestones,
         methods=methods,
@@ -328,33 +374,40 @@ def table_perf_results(
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
     )
-    mean_data = _load_performance_means(data)
+    data, skipped = _load_results_with_skips(
+        model=model,
+        milestones=milestones,
+        methods=perf_methods,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
         return pd.DataFrame()
 
+    table_metrics = METRIC_ORDER + [("H", "quality")]
     columns = pd.MultiIndex.from_tuples(
-        [(f"step {step}", metric_short) for step in milestones for metric_short, _ in METRIC_ORDER]
-        + [("Mean", metric_short) for metric_short, _ in METRIC_ORDER]
+        [(f"step {step}", metric_short) for step in milestones for metric_short, _ in table_metrics]
     )
 
     table_data: dict[str, list[str]] = {}
-    for method_name in _ordered_method_names(data, methods):
+    for method_name in _ordered_method_names(data, perf_methods):
         summary = data[method_name]
+        quality_values = _quality_series(summary)
         row: list[str] = []
         for step_index, _ in enumerate(milestones):
             for _, metric_name in METRIC_ORDER:
                 value = summary[metric_name][step_index]
                 row.append(f"{value:.4f}" if value is not None else "-")
-        for _, metric_name in METRIC_ORDER:
-            value = mean_data[method_name][metric_name]
-            row.append(f"{value:.4f}" if value is not None else "-")
+            quality_value = quality_values[step_index]
+            row.append(f"{quality_value:.4f}" if quality_value is not None else "-")
         table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
-    print(f"performance | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"performance | H=harmonic mean(ES, Loc, Port) | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [dict(selector="th", props=[("text-align", "center")])]
     )
@@ -398,19 +451,19 @@ def table_composite_results(
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
-    mean_data = _load_composite_means(data)
+    final_data = _load_composite_finals(data)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
         return pd.DataFrame()
 
-    columns = [f"step {step}" for step in milestones] + ["Mean"]
+    columns = [f"step {step}" for step in milestones] + ["Final"]
     table_data: dict[str, list[str]] = {}
     for method_name in _ordered_method_names(data, methods):
         composite_values = _composite_series(data[method_name])
         row = [f"{value:.4f}" if value is not None else "-" for value in composite_values]
-        mean_value = mean_data[method_name]
-        row.append(f"{mean_value:.4f}" if mean_value is not None else "-")
+        final_value = final_data[method_name]
+        row.append(f"{final_value:.4f}" if final_value is not None else "-")
         table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
@@ -436,35 +489,55 @@ def plot_perf_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (14.0, 13.5),
+    figsize: tuple[float, float] = (14.0, 17.5),
 ) -> None:
     milestones = _normalize_milestones(milestones)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
-    mean_data = _load_performance_means(data)
+    perf_methods = _performance_methods_with_base(
+        model=model,
+        milestones=milestones,
+        methods=methods,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    data, skipped = _load_results_with_skips(model, milestones, perf_methods, n_runs, judge_repeats, evaluation_dir)
+    final_data = _load_performance_finals(data)
     _print_skipped(skipped)
-    if not data or not mean_data:
+    if not data or not final_data:
         print("No result files found for the selected settings.")
         return
 
-    methods_sorted = _ordered_method_names(data, methods)
+    methods_sorted = _ordered_method_names(data, perf_methods)
     method_colors = _method_colors(methods_sorted)
+    quality_series_by_method = {method_name: _quality_series(data[method_name]) for method_name in methods_sorted}
+    plot_metrics = METRIC_ORDER + [("H", "quality")]
     perf_bar_upper = _zero_based_upper(
-        mean_data[method_name][metric_name]
+        value
         for method_name in methods_sorted
-        for _, metric_name in METRIC_ORDER
+        for value in (
+            list(final_data[method_name].values())
+            + [_final_milestone_value(quality_series_by_method[method_name])]
+        )
     )
 
-    fig, axes = plt.subplots(3, 2, figsize=figsize, squeeze=False)
-    for metric_index, (short_name, metric_name) in enumerate(METRIC_ORDER):
+    fig, axes = plt.subplots(len(plot_metrics), 2, figsize=figsize, squeeze=False)
+    for metric_index, (short_name, metric_name) in enumerate(plot_metrics):
         line_ax = axes[metric_index][0]
         bar_ax = axes[metric_index][1]
         has_any_line = False
 
         for method_name in methods_sorted:
-            values = data[method_name][metric_name]
+            values = quality_series_by_method[method_name] if metric_name == "quality" else data[method_name][metric_name]
             if not any(value is not None for value in values):
                 continue
-            line_ax.plot(milestones, values, marker="o", markersize=4, linewidth=1.6, color=method_colors[method_name])
+            line_ax.plot(
+                milestones,
+                values,
+                marker="o",
+                markersize=4,
+                color=method_colors[method_name],
+                **_line_style_for_method(method_name),
+            )
             has_any_line = True
 
         if not has_any_line:
@@ -474,10 +547,16 @@ def plot_perf_results(
         line_ax.set_xticks(milestones)
         line_ax.set_xlabel("step")
         line_ax.set_ylabel("score")
-        line_ax.set_title(f"{short_name} Sequential", fontweight="bold")
+        line_title = "H-Mean Sequential" if metric_name == "quality" else f"{short_name} Sequential"
+        line_ax.set_title(line_title, fontweight="bold")
         line_ax.grid(alpha=0.25)
 
-        values = [mean_data[method_name][metric_name] for method_name in methods_sorted]
+        values = [
+            _final_milestone_value(quality_series_by_method[method_name])
+            if metric_name == "quality"
+            else final_data[method_name][metric_name]
+            for method_name in methods_sorted
+        ]
         bar_methods = [method_name for method_name, value in zip(methods_sorted, values) if value is not None]
         bar_values = [value for value in values if value is not None]
         if bar_values:
@@ -486,13 +565,24 @@ def plot_perf_results(
             bar_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=bar_ax.transAxes, fontsize=9, color="gray")
             bar_ax.set_xticks([])
         bar_ax.tick_params(axis="x", rotation=45)
-        bar_ax.set_ylabel("mean score")
+        bar_ax.set_ylabel("final score")
         bar_ax.set_ylim(0, perf_bar_upper)
-        bar_ax.set_title(f"{short_name} Mean", fontweight="bold")
+        bar_title = "H-Mean Final" if metric_name == "quality" else f"{short_name} Final"
+        bar_ax.set_title(f"{bar_title} @ {milestones[-1]}", fontweight="bold")
         bar_ax.grid(axis="y", alpha=0.25)
 
     fig.legend(
-        handles=[Line2D([0], [0], color=method_colors[method], lw=2, label=method) for method in methods_sorted],
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                color=method_colors[method],
+                lw=_line_style_for_method(method).get("linewidth", 2),
+                linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                label=method,
+            )
+            for method in methods_sorted
+        ],
         loc="center left",
         bbox_to_anchor=(1.01, 0.5),
         title="method",
@@ -541,7 +631,7 @@ def plot_time_results(
     line_ax.set_title("Sequential Avg Edit Time", fontweight="bold")
     line_ax.grid(alpha=0.25)
 
-    final_times = [_last_non_none(data[method_name]["avg_time"]) for method_name in methods_sorted]
+    final_times = [_final_milestone_value(data[method_name]["avg_time"]) for method_name in methods_sorted]
     bar_methods = [method_name for method_name, value in zip(methods_sorted, final_times) if value is not None]
     bar_values = [value for value in final_times if value is not None]
     if bar_values:
@@ -555,7 +645,17 @@ def plot_time_results(
     bar_ax.grid(axis="y", alpha=0.25)
 
     fig.legend(
-        handles=[Line2D([0], [0], color=method_colors[method], lw=2, label=method) for method in methods_sorted],
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                color=method_colors[method],
+                lw=_line_style_for_method(method).get("linewidth", 2),
+                linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                label=method,
+            )
+            for method in methods_sorted
+        ],
         loc="center left",
         bbox_to_anchor=(1.01, 0.5),
         title="method",
@@ -576,9 +676,9 @@ def plot_composite_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
-    mean_data = _load_composite_means(data)
+    final_data = _load_composite_finals(data)
     _print_skipped(skipped)
-    if not data or not mean_data:
+    if not data or not final_data:
         print("No result files found for the selected settings.")
         return
 
@@ -607,7 +707,7 @@ def plot_composite_results(
     line_ax.set_title("Composite Sequential", fontweight="bold")
     line_ax.grid(alpha=0.25)
 
-    values = [mean_data[method_name] for method_name in methods_sorted]
+    values = [final_data[method_name] for method_name in methods_sorted]
     bar_methods = [method_name for method_name, value in zip(methods_sorted, values) if value is not None]
     bar_values = [value for value in values if value is not None]
     if bar_values:
@@ -616,13 +716,23 @@ def plot_composite_results(
         bar_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=bar_ax.transAxes, fontsize=9, color="gray")
         bar_ax.set_xticks([])
     bar_ax.tick_params(axis="x", rotation=45)
-    bar_ax.set_ylabel("mean composite score")
+    bar_ax.set_ylabel("final composite score")
     bar_ax.set_ylim(0, _zero_based_upper(bar_values))
-    bar_ax.set_title("Composite Mean", fontweight="bold")
+    bar_ax.set_title(f"Composite Final @ {milestones[-1]}", fontweight="bold")
     bar_ax.grid(axis="y", alpha=0.25)
 
     fig.legend(
-        handles=[Line2D([0], [0], color=method_colors[method], lw=2, label=method) for method in methods_sorted],
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                color=method_colors[method],
+                lw=_line_style_for_method(method).get("linewidth", 2),
+                linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                label=method,
+            )
+            for method in methods_sorted
+        ],
         loc="center left",
         bbox_to_anchor=(1.01, 0.5),
         title="method",
@@ -630,3 +740,5 @@ def plot_composite_results(
     fig.suptitle(f"composite | model={model} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
+
+

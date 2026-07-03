@@ -1,9 +1,5 @@
 alg_name: GRACE
-model_name: Qwen/Qwen2.5-7B
-gpu_id: 0
-fp16: True
-model_parallel: False
-device_map: auto
+model_config: ../base/qwen2.5-7b.yaml
 
 inner_params:
   - model.layers[18].mlp.down_proj.weight
@@ -20,3 +16,4 @@ replacement: replace_last
 eps_expand: coverage
 num_pert: 8
 dropout: 0.0
+

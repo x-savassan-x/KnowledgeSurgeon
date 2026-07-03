@@ -20,12 +20,11 @@ eval_milestones: [10, 100, 1000, 2000, 5000]
 
 n_runs: 3
 # Optional contiguous run subset for parallel machines.
-# Paths still use r{n_runs}-j{judge_repeats}; these settings only decide
+# Paths still use r{n_runs}-j{judge.repeats}; these settings only decide
 # which run indices this producer/worker instance handles.
 run_start: 1
 # null means run from run_start through n_runs.
 run_count: null
-judge_repeats: 3
 base_seed: 0
 
 generation:
@@ -41,10 +40,7 @@ generation:
     unsafe_methods: []
   model_config:
     max_new_tokens: 50
-    # do_sample: true
-    # temperature: 0.7
-    # top_p: 0.8
-    # top_k: 20
+    do_sample: false
     stop_strings:
       - "\n"
     strip_leading_newlines: true
@@ -56,18 +52,19 @@ judge:
   base_url: http://localhost:8080/v1
   api_key: local
   model: Qwen/Qwen3.6-35B-A3B-FP8
-  batch_size: 10
+  repeats: 3
   max_concurrency: 50
-  # max_retries: 5
-  # init_retry_delay: 1.0
-  # max_retry_delay: 30.0
+  batch_size: 10
+  max_retries: 5
+  init_retry_delay: 1.0
+  max_retry_delay: 10.0
   model_config:
-    max_tokens: 128
+    max_tokens: 64
     temperature: 0.01
     top_p: 1.0
     presence_penalty: 0.0
+    frequency_penalty: 0.0
     extra_body:
-      top_k: 20
       chat_template_kwargs:
         enable_thinking: false
   # keep_pbar: false
@@ -79,3 +76,4 @@ worker:
   file_concurrency: 1
   overwrite: false
   stop_when_complete: true
+  verbose: true

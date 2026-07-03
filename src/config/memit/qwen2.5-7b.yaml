@@ -1,9 +1,5 @@
 alg_name: MEMIT
-model_name: Qwen/Qwen2.5-7B
-gpu_id: 0
-fp16: True
-model_parallel: False
-device_map: auto
+model_config: ../base/qwen2.5-7b.yaml
 
 layers: [4, 5, 6, 7, 8]
 layer_selection: all
@@ -28,3 +24,4 @@ mom2_dataset: wikipedia
 mom2_n_samples: 10000
 mom2_dtype: float32
 stats_dir: data/layer_stats
+

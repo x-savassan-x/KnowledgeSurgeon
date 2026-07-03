@@ -164,10 +164,6 @@ async def get_judge_scores(records: list[EvalRecord], **config):
     if not model:
         raise ValueError("model must be specified")
 
-    batch_size = config.get("batch_size", 8)
-    if batch_size <= 0:
-        raise ValueError("batch_size must be > 0")
-
     repeats = config.get("repeats", 3)
     if repeats <= 0:
         raise ValueError("repeats must be > 0")
@@ -175,6 +171,10 @@ async def get_judge_scores(records: list[EvalRecord], **config):
     max_concurrency = config.get("max_concurrency", 10)
     if max_concurrency <= 0:
         raise ValueError("max_concurrency must be > 0")
+
+    batch_size = config.get("batch_size", 8)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
 
     max_retries = config.get("max_retries", 5)
     if max_retries < 0:

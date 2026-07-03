@@ -1,0 +1,5 @@
+model_name: Qwen/Qwen2.5-7B
+gpu_id: 0
+fp16: true
+model_parallel: false
+device_map: auto

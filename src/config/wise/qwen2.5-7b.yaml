@@ -1,9 +1,5 @@
 alg_name: WISE
-model_name: Qwen/Qwen2.5-7B
-gpu_id: 0
-fp16: True
-model_parallel: False
-device_map: auto
+model_config: ../base/qwen2.5-7b.yaml
 
 mask_ratio: 0.2
 edit_lr: 1.0
@@ -25,3 +21,4 @@ weights: 1.0
 
 retrieve: True
 replay: False
+
