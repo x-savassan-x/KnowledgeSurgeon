@@ -21,7 +21,7 @@ lm_head_module: "lm_head"
 mom2_adjustment: True
 mom2_update_weight: 15000
 mom2_dataset: wikipedia
-mom2_n_samples: 10000
+mom2_n_samples: 100000
 mom2_dtype: float32
 stats_dir: data/layer_stats
 
