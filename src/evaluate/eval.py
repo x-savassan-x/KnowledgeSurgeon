@@ -96,7 +96,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
     def _clean_prediction(prediction: str) -> str:
         text = prediction
         if strip_leading_newlines:
-            text = text.lstrip("\r\n")
+            text = text.lstrip(" \t\r\n")
 
         if truncate_at_stop_strings:
             stop_positions = [
