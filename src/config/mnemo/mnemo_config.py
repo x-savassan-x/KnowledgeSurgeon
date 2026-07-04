@@ -83,6 +83,9 @@ class MnemoBatchConfig:
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"
     stats_dir: str = "data/layer_stats"
+    nullspace_threshold: float = 2e-2
+    L2: float = 1
+    P_loc: str = "data/alpha_edit_projectors/null_space_project.pt"
 
     max_length: int = 40
     batch_size: int = 1
@@ -96,6 +99,7 @@ class MnemoBatchConfig:
 
     def __post_init__(self):
         self.stats_dir = _resolve_project_path(self.stats_dir)
+        self.P_loc = _resolve_project_path(self.P_loc)
 
 
 @dataclass(kw_only=True)
@@ -145,7 +149,7 @@ class MnemoConfig(Config):
             raise ValueError(
                 f"Unsupported Mnemo online phase algorithm: {self.online_config.alg_name}."
             )
-        if self.batch_config.alg_name != "MEMIT":
+        if self.batch_config.alg_name not in {"MEMIT", "AlphaEdit"}:
             raise ValueError(
                 f"Unsupported Mnemo batch phase algorithm: {self.batch_config.alg_name}."
             )

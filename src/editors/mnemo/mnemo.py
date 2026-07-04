@@ -52,6 +52,7 @@ class Mnemo(Editor):
 
     def reset(self):
         self._restore_origin_weights()
+        self.batch_phase.reset()
         self._buffer.clear()
         self._cycle_start_online_weights.clear()
 
