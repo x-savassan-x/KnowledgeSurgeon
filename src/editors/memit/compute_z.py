@@ -96,33 +96,9 @@ def compute_z(
     def edit_output_fn(cur_out, cur_layer):
         nonlocal target_init
 
-        def _unwrap_output(output):
-            if isinstance(output, torch.Tensor):
-                return output, None
-            if isinstance(output, (list, tuple)):
-                if len(output) == 0:
-                    raise ValueError("Layer output container is empty.")
-                return output[0], output
-            raise TypeError(
-                f"Unsupported layer output type {type(output)} encountered in MEMIT."
-            )
-
-        def _rewrap_output(updated, original):
-            if original is None:
-                return updated
-            if isinstance(original, list):
-                new_out = list(original)
-            elif isinstance(original, tuple):
-                new_out = list(original)
-            else:
-                raise TypeError(
-                    f"Unsupported layer output container {type(original)} in MEMIT."
-                )
-            new_out[0] = updated
-            return type(original)(new_out) if isinstance(original, tuple) else new_out
-
         if cur_layer == hparams.layer_module_tmp.format(layer):
-            layer_output, original_container = _unwrap_output(cur_out)
+            layer_output = nethook.get_hidden_state(cur_out)
+            delta_for_hidden = delta.to(device=layer_output.device, dtype=layer_output.dtype)
 
             # Store initial value of the vector of interest
             if target_init is None:
@@ -134,11 +110,11 @@ def compute_z(
             for i, idx in enumerate(lookup_idxs):
 
                 if len(lookup_idxs)!=layer_output.shape[0]:
-                    layer_output[idx, i, :] += delta
+                    layer_output[idx, i, :] += delta_for_hidden
                 else:
-                    layer_output[i, idx, :] += delta
+                    layer_output[i, idx, :] += delta_for_hidden
 
-            return _rewrap_output(layer_output, original_container)
+            return nethook.replace_hidden_state(cur_out, layer_output)
 
         return cur_out
 
@@ -176,11 +152,9 @@ def compute_z(
 
         # Compute loss on rewriting targets
 
-        loss_layer_out = tr[hparams.layer_module_tmp.format(loss_layer)].output
-        if isinstance(loss_layer_out, (list, tuple)):
-            output = loss_layer_out[0]
-        else:
-            output = loss_layer_out
+        output = nethook.get_hidden_state(
+            tr[hparams.layer_module_tmp.format(loss_layer)].output
+        )
 
         if output.shape[1]!=rewriting_targets.shape[1]:
             output=torch.transpose(output, 0, 1)
@@ -229,7 +203,7 @@ def compute_z(
             with torch.no_grad():
                 delta[...] = delta * max_norm / delta.norm()
 
-    target = target_init + delta
+    target = target_init + delta.to(device=target_init.device, dtype=target_init.dtype)
     # print(
     #     f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
     # )

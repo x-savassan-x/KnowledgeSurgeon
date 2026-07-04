@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils.devices import get_module_device, to_param_device
+from ...utils.devices import copy_to_param, get_module_device, to_param_device
 from ...utils.generate import generate_fast
 from ...utils import nethook
 from ..rome.layer_stats import layer_stats
@@ -53,7 +53,7 @@ def apply_memit_to_model(
 
             if return_orig_weights and w_name not in weights_copy:
                 weights_copy[w_name] = w.detach().clone()
-            w[...] += upd_matrix.float()
+            w[...] += upd_matrix.to(device=w.device, dtype=w.dtype)
 
     # print(f"New weights successfully inserted into {list(deltas.keys())}")
 
@@ -207,15 +207,15 @@ def execute_memit(
             hparams=hparams
         )
 
-        # Compute update in float32 to avoid the large float64 memory blow-up.
+        # Compute update in double precision to match the upstream MEMIT baseline.
         layer_ks, targets = (
-            layer_ks.to(layer_device).float(),
-            targets.to(layer_device).float(),
+            layer_ks.double().to(layer_device),
+            targets.double().to(layer_device),
         )
         cov = cov.to(layer_device)
 
         adj_k = torch.linalg.solve(
-            hparams.mom2_update_weight * cov.float() + layer_ks @ layer_ks.T,
+            hparams.mom2_update_weight * cov.double() + layer_ks @ layer_ks.T,
             layer_ks,
         )
         resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
@@ -230,7 +230,11 @@ def execute_memit(
 
         # Update model weights and record desired changes in `delta` variable
         with torch.no_grad():
-            weights[weight_name][...] = weights_copy[weight_name] + upd_matrix.float()
+            updated_weight = weights_copy[weight_name].to(
+                device=upd_matrix.device,
+                dtype=upd_matrix.dtype,
+            ) + upd_matrix
+            copy_to_param(weights[weight_name], updated_weight)
             deltas[weight_name] = (
                 adj_k.detach().cpu(),
                 resid.detach().cpu(),
@@ -246,7 +250,7 @@ def execute_memit(
     # Restore state of original model
     with torch.no_grad():
         for k, v in weights.items():
-            v[...] = weights_copy[k]
+            copy_to_param(v, weights_copy[k])
 
     # print(f"Deltas successfully computed for {list(weights.keys())}")
 

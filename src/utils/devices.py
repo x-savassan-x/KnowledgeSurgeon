@@ -74,3 +74,10 @@ def to_param_device(
     if tensor.device == param.device and tensor.dtype == target_dtype:
         return tensor
     return tensor.to(device=param.device, dtype=target_dtype)
+
+
+def copy_to_param(param: torch.Tensor, value: Any) -> None:
+    """Copy a tensor-like value into a parameter using the parameter's dtype/device."""
+    if not torch.is_tensor(value):
+        value = torch.as_tensor(value)
+    param[...] = value.to(device=param.device, dtype=param.dtype)

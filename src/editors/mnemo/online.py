@@ -1,25 +1,21 @@
-from abc import ABC, abstractmethod
-
 from ...config import MnemoConfig
 from ..editor_utils import EditRequest
-from ..rome.rome_main import apply_rome_to_model
+from ..r_rome.r_rome_main import apply_r_rome_to_model
 
 
-class MnemoOnlinePhase(ABC):
+class MnemoOnlinePhase:
     def __init__(self, model, tokenizer, config: MnemoConfig):
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
 
     @property
-    @abstractmethod
     def weight_names(self) -> list[str]: ...
 
-    @abstractmethod
     def apply(self, request: EditRequest): ...
 
 
-class RomeOnlinePhase(MnemoOnlinePhase):
+class RRomeOnlinePhase(MnemoOnlinePhase):
     @property
     def weight_names(self) -> list[str]:
         return [
@@ -28,7 +24,7 @@ class RomeOnlinePhase(MnemoOnlinePhase):
         ]
 
     def apply(self, request: EditRequest):
-        apply_rome_to_model(
+        apply_r_rome_to_model(
             self.model,
             self.tokenizer,
             [self._to_backend_request(request)],
@@ -46,13 +42,5 @@ class RomeOnlinePhase(MnemoOnlinePhase):
         }
 
 
-ONLINE_PHASE_REGISTRY: dict[str, type[MnemoOnlinePhase]] = {
-    "ROME": RomeOnlinePhase,
-}
-
-
 def build_online_phase(model, tokenizer, config: MnemoConfig) -> MnemoOnlinePhase:
-    alg_name = config.online_config.alg_name
-    if alg_name not in ONLINE_PHASE_REGISTRY:
-        raise ValueError(f"Unsupported Mnemo online phase algorithm: {alg_name}.")
-    return ONLINE_PHASE_REGISTRY[alg_name](model, tokenizer, config)
+    return RRomeOnlinePhase(model, tokenizer, config)

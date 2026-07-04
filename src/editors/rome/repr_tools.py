@@ -92,10 +92,7 @@ def get_reprs_at_idxs(
 
     def _process(cur_repr, batch_idxs, key):
         nonlocal to_return
-        if isinstance(cur_repr, tuple):
-            if len(cur_repr) == 0:
-                return
-            cur_repr = cur_repr[0]
+        cur_repr = nethook.get_hidden_state(cur_repr)
         if cur_repr.shape[0] != len(batch_idxs):
             cur_repr = cur_repr.transpose(0, 1)
         for i, idx_list in enumerate(batch_idxs):

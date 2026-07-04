@@ -2,7 +2,7 @@ alg_name: Mnemo
 model_config: ../base/qwen2.5-7b.yaml
 
 online:
-  alg_name: ROME
+  alg_name: R-ROME
   layers: [5]
   fact_token: subject_last
   v_num_grad_steps: 25
@@ -23,6 +23,9 @@ online:
   mom2_n_samples: 100000
   mom2_dtype: float32
   stats_dir: ./data/stats
+  enable_prompt_keys: False
+  enable_random_prefix_keys: True
+  original_implementation: False
 
 batch:
   alg_name: AlphaEdit

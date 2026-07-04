@@ -17,7 +17,7 @@ def _resolve_project_path(path_value: str) -> str:
 
 @dataclass
 class MnemoOnlineConfig:
-    alg_name: str = "ROME"
+    alg_name: str = "R-ROME"
 
     layers: list[int] = field(default_factory=list)
     fact_token: str = "subject_last"
@@ -45,6 +45,10 @@ class MnemoOnlineConfig:
     mom2_dtype: str = "float32"
     stats_dir: str = "./data/stats"
 
+    enable_prompt_keys: bool = False
+    enable_random_prefix_keys: bool = True
+    original_implementation: bool = False
+
     device: torch.device = field(init=False)
     model_name: str = field(init=False)
     gpu_id: int = field(init=False)
@@ -58,7 +62,7 @@ class MnemoOnlineConfig:
 
 @dataclass
 class MnemoBatchConfig:
-    alg_name: str = "MEMIT"
+    alg_name: str = "AlphaEdit"
 
     layers: list[int] = field(default_factory=list)
     layer_selection: str = "all"
@@ -145,11 +149,11 @@ class MnemoConfig(Config):
         return MnemoBatchConfig(**phase_config)
 
     def _validate_phase_algorithms(self):
-        if self.online_config.alg_name != "ROME":
+        if self.online_config.alg_name != "R-ROME":
             raise ValueError(
                 f"Unsupported Mnemo online phase algorithm: {self.online_config.alg_name}."
             )
-        if self.batch_config.alg_name not in {"MEMIT", "AlphaEdit"}:
+        if self.batch_config.alg_name != "AlphaEdit":
             raise ValueError(
                 f"Unsupported Mnemo batch phase algorithm: {self.batch_config.alg_name}."
             )

@@ -16,6 +16,7 @@ class WiseConfig(Config):
     alpha: float = 5.0  # act_margin[0]
     beta: float = 20.0  # act_margin[1]
     gamma: float = 10.0  # act_margin[2]
+    act_margin: list[float] | None = None
     act_ratio: float = 0.8
     merge_freq: int = 1000
     retrieve: bool = True
@@ -33,3 +34,11 @@ class WiseConfig(Config):
     batch_size: int = 1
     max_length: int = 30
     sequential_edit: bool = True
+    use_chat_template: bool = False
+
+    def __post_init__(self):
+        if self.act_margin is not None:
+            if len(self.act_margin) != 3:
+                raise ValueError("WISE act_margin must contain [alpha, beta, gamma].")
+            self.alpha, self.beta, self.gamma = self.act_margin
+        super().__post_init__()

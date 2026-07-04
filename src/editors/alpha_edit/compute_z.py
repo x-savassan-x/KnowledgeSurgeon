@@ -97,27 +97,22 @@ def compute_z(
         nonlocal target_init
 
         if cur_layer == hparams.layer_module_tmp.format(layer):
+            hidden_state = nethook.get_hidden_state(cur_out)
+            delta_for_hidden = delta.to(device=hidden_state.device, dtype=hidden_state.dtype)
             # Store initial value of the vector of interest
             if target_init is None:
                 # print("Recording initial value of v*")
                 # Initial value is recorded for the clean sentence
-                if isinstance(cur_out, tuple):
-                    target_init = cur_out[0][0, lookup_idxs[0]].detach().clone()
-                else:
-                    target_init = cur_out[0, lookup_idxs[0]].detach().clone()
+                target_init = hidden_state[0, lookup_idxs[0]].detach().clone()
 
             # Add intervened delta
             for i, idx in enumerate(lookup_idxs):
-                if isinstance(cur_out, tuple):
-                    if len(lookup_idxs) != len(cur_out[0]):
-                        cur_out[0][idx, i, :] += delta
-                    else:
-                        cur_out[0][i, idx, :] += delta
+                if len(lookup_idxs) != len(hidden_state):
+                    hidden_state[idx, i, :] += delta_for_hidden
                 else:
-                    if len(lookup_idxs) != len(cur_out):
-                        cur_out[idx, i, :] += delta
-                    else:
-                        cur_out[i, idx, :] += delta
+                    hidden_state[i, idx, :] += delta_for_hidden
+
+            return nethook.replace_hidden_state(cur_out, hidden_state)
 
         return cur_out
 
@@ -155,10 +150,9 @@ def compute_z(
                 kl_distr_init = kl_log_probs.detach().clone()
 
         # Compute loss on rewriting targets
-        if isinstance(tr[hparams.layer_module_tmp.format(loss_layer)].output, tuple):
-            output = tr[hparams.layer_module_tmp.format(loss_layer)].output[0]
-        else:
-            output = tr[hparams.layer_module_tmp.format(loss_layer)].output
+        output = nethook.get_hidden_state(
+            tr[hparams.layer_module_tmp.format(loss_layer)].output
+        )
         if output.shape[1] != rewriting_targets.shape[1]:
             output = torch.transpose(output, 0, 1)
         full_repr = output[:len(rewriting_prompts)]
@@ -205,7 +199,7 @@ def compute_z(
             with torch.no_grad():
                 delta[...] = delta * max_norm / delta.norm()
 
-    target = target_init + delta
+    target = target_init + delta.to(device=target_init.device, dtype=target_init.dtype)
     # print(
     #     f"Init norm {target_init.norm()} | Delta norm {delta.norm()} | Target norm {target.norm()}"
     # )

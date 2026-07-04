@@ -214,6 +214,39 @@ class StopForward(Exception):
     pass
 
 
+def get_hidden_state(output):
+    """
+    Return the primary hidden-state tensor from a transformer layer output.
+    Decoder layers may return the tensor directly or wrap it as the first
+    item of a tuple/list.
+    """
+    if isinstance(output, torch.Tensor):
+        return output
+    if isinstance(output, (list, tuple)):
+        if len(output) == 0:
+            raise ValueError("Cannot read hidden state from an empty layer output.")
+        return output[0]
+    raise TypeError(f"Unsupported layer output type: {type(output)}")
+
+
+def replace_hidden_state(output, hidden_state):
+    """
+    Replace the primary hidden-state tensor while preserving the original
+    output container type.
+    """
+    if isinstance(output, torch.Tensor):
+        return hidden_state
+    if isinstance(output, list):
+        updated = list(output)
+        updated[0] = hidden_state
+        return updated
+    if isinstance(output, tuple):
+        updated = list(output)
+        updated[0] = hidden_state
+        return type(output)(updated)
+    raise TypeError(f"Unsupported layer output type: {type(output)}")
+
+
 def recursive_copy(x, clone=None, detach=None, retain_grad=None):
     """
     Copies a reference to a tensor, or an object that contains tensors,

@@ -66,13 +66,34 @@ def tokenize(batch, tokenizer, device, context_templates, hparams):
 
     mask_token = -100
 
-    full_prompt = [
-        f"{templ.format(p + ' ' + l)}"
-        for templ in context_templates
-        for p, l in zip(prompts, labels)
-    ]
+    if getattr(hparams, "use_chat_template", False):
+        prompt_texts = [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": templ.format(p)}],
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+            for templ in context_templates
+            for p in prompts
+        ]
+        full_prompt = [
+            f"{prompt_text} {label}"
+            for prompt_text, label in zip(prompt_texts, labels * len(context_templates))
+        ]
+    else:
+        prompt_texts = [
+            f"{templ.format(p)}"
+            for templ in context_templates
+            for p in prompts
+        ]
+        full_prompt = [
+            f"{templ.format(p + ' ' + l)}"
+            for templ in context_templates
+            for p, l in zip(prompts, labels)
+        ]
+
     prompt_ids = tokenizer(
-        [f"{templ.format(p)}" for templ in context_templates for p in prompts],
+        prompt_texts,
         return_tensors="pt", padding=True, truncation=True,
     )["input_ids"]
 

@@ -71,15 +71,19 @@ def compute_v(
     def edit_output_fn(cur_out, cur_layer):
         nonlocal target_init
         if cur_layer == hparams.mlp_module_tmp.format(layer):
+            hidden_state = nethook.get_hidden_state(cur_out)
+            delta_for_hidden = delta.to(device=hidden_state.device, dtype=hidden_state.dtype)
             if target_init is None:
                 # print("Recording initial value of v*")
-                target_init = cur_out[0, lookup_idxs[0]].detach().clone()
+                target_init = hidden_state[0, lookup_idxs[0]].detach().clone()
 
             for i, idx in enumerate(lookup_idxs):
-                if len(lookup_idxs) != len(cur_out):
-                    cur_out[idx, i, :] += delta
+                if len(lookup_idxs) != len(hidden_state):
+                    hidden_state[idx, i, :] += delta_for_hidden
                 else:
-                    cur_out[i, idx, :] += delta
+                    hidden_state[i, idx, :] += delta_for_hidden
+
+            return nethook.replace_hidden_state(cur_out, hidden_state)
 
         return cur_out
 
@@ -149,7 +153,7 @@ def compute_v(
             with torch.no_grad():
                 delta[...] = delta * max_norm / delta.norm()
 
-    target = target_init + delta.to(target_init.dtype)
+    target = target_init + delta.to(device=target_init.device, dtype=target_init.dtype)
 
     cur_input, cur_output = get_module_input_output_at_word(
         model,

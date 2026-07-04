@@ -47,7 +47,8 @@ def layer_stats(
 ):
     def get_ds():
         ds_config_map = {
-            "wikitext": ("wikitext", "wikitext-103-raw-v1"),
+            "wikitext": ("Salesforce/wikitext", "wikitext-103-raw-v1"),
+            "wikitext2": ("Salesforce/wikitext", "wikitext-2-raw-v1"),
             "wikipedia": ("wikimedia/wikipedia", "20231101.en"),
         }
         hf_path, hf_config = ds_config_map[ds_name]
