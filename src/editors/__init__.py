@@ -6,7 +6,6 @@ from .editor_utils import EditRequest
 from .ft import FT
 from .rome import ROME
 from .r_rome import RROME
-from .memit import MEMIT
 from .grace import GRACE
 from .wise import WISE
 from .alpha_edit import AlphaEdit
@@ -17,7 +16,6 @@ EDITOR_REGISTRY: dict[str, type[Editor]] = {
     "FT": FT,
     "ROME": ROME,
     "R-ROME": RROME,
-    "MEMIT": MEMIT,
     "GRACE": GRACE,
     "WISE": WISE,
     "AlphaEdit": AlphaEdit,

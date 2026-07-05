@@ -6,7 +6,6 @@ model_name: qwen2.5-7b
 editing_methods:
   - ft
   - rome
-  - memit
   - grace
   - r_rome
   - wise

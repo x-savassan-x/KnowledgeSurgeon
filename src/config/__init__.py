@@ -7,7 +7,6 @@ from .config import Config
 from .ft import FtConfig
 from .rome import RomeConfig
 from .r_rome import RRomeConfig
-from .memit import MemitConfig
 from .grace import GraceConfig
 from .wise import WiseConfig
 from .alpha_edit import AlphaEditConfig
@@ -18,7 +17,6 @@ CONFIG_REGISTRY: dict[str, type[Config]] = {
     "FT": FtConfig,
     "ROME": RomeConfig,
     "R-ROME": RRomeConfig,
-    "MEMIT": MemitConfig,
     "GRACE": GraceConfig,
     "WISE": WiseConfig,
     "AlphaEdit": AlphaEditConfig,
