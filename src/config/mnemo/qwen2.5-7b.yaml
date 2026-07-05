@@ -54,6 +54,6 @@ batch:
   L2: 1
   P_loc: data/alpha_edit_projectors/null_space_project.pt
 
-buffer_capacity: 50
+buffer_capacity: 100
 auto_consolidate: True
 
