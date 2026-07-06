@@ -1,192 +1,198 @@
-import argparse
+from __future__ import annotations
+
 import asyncio
 import json
-from datetime import datetime
+from dataclasses import asdict
+from itertools import batched, chain
 from pathlib import Path
 from random import Random
 from statistics import mean
 from typing import Any, Iterable
 
-from .eval import score_serialized_eval_result
 from .io import (
     EVALUATION_DIR,
-    build_milestone_result_path,
     load_result_file,
     save_benchmark_results,
     save_scored_results,
 )
+from .judge_utils import (
+    JUDGE_PROMPT_TEMPLATE,
+    assign_judge_values,
+    base_result_names,
+    base_scored_path,
+    build_judge_model_config,
+    build_judge_task_input,
+    existing_scored_path_for_unscored,
+    expected_scored_paths,
+    find_scored_files,
+    find_unscored_files,
+    format_file_label,
+    log_status,
+    matches_filter,
+    missing_paths,
+    normalize_milestones,
+    scored_path_from_meta,
+    slice_base_result,
+)
+from .schema import EvalRecord, EvalResult
 
 
-def _normalize_milestones(milestones: Iterable[int]) -> list[int]:
-    normalized = sorted({int(step) for step in milestones})
-    if not normalized:
-        raise ValueError("milestones must not be empty")
-    return normalized
+async def score_eval_results(
+    eval_results: list[EvalResult],
+    **config,
+) -> list[EvalResult]:
+    metric_results = [
+        metric_result
+        for eval_result in eval_results
+        for metric_result in (eval_result.success, eval_result.locality, eval_result.portability)
+        if metric_result is not None
+    ]
+    flat_records = list(chain.from_iterable(metric_result.details for metric_result in metric_results))
+    await get_judge_scores(flat_records, **config)
+    for result in eval_results:
+        result.update_score()
+    return eval_results
 
 
-def _as_set(values: Iterable[Any] | None) -> set[Any] | None:
-    if values is None:
-        return None
-    return set(values)
+async def score_serialized_eval_result(
+    result_payload: dict[str, Any],
+    **config,
+) -> dict[str, Any]:
+    eval_result = EvalResult.from_dict(result_payload)
+    await score_eval_results([eval_result], **config)
+    return asdict(eval_result)
 
 
-def _timestamp() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+async def get_judge_scores(records: list[EvalRecord], **config) -> None:
+    if not records:
+        return
 
+    from openai import AsyncOpenAI
+    from tqdm.auto import tqdm
 
-def _log_worker(message: str, log_path: Path | str | None, verbose: bool = False) -> None:
-    line = f"[{_timestamp()}] {message}"
-    if log_path is not None:
-        path = Path(log_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as file:
-            file.write(f"{line}\n")
-    if verbose:
-        print(line)
+    base_url = config.get("base_url")
+    api_key = config.get("api_key")
+    model = config.get("model")
+    if not model:
+        raise ValueError("model must be specified")
 
+    repeats = config.get("repeats", 3)
+    if repeats <= 0:
+        raise ValueError("repeats must be > 0")
 
-def _format_file_label(path: Path, evaluation_dir: Path | str | None = None) -> str:
-    parsed = load_result_file(path, evaluation_dir=evaluation_dir)
-    if parsed is None:
-        return str(path)
-    meta, _ = parsed
-    return (
-        f"method={meta['method']} "
-        f"result={meta['result_name']} "
-        f"run={meta['run_index']} "
-        f"step={meta.get('step')}"
-    )
+    max_concurrency = config.get("max_concurrency", 10)
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be > 0")
 
+    batch_size = config.get("batch_size", 8)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
 
-def _matches_filter(
-    meta: dict[str, Any],
-    model: str,
-    milestones: list[int],
-    n_runs: int,
-    judge_repeats: int,
-    methods: set[str] | None,
-    result_names: set[str] | None,
-    run_indices: set[int] | None,
-    result_group: str,
-) -> bool:
-    if meta["result_group"] != result_group:
-        return False
-    if meta["model"] != model:
-        return False
-    if meta["milestones"] != milestones:
-        return False
-    if meta["n_runs"] != n_runs or meta["judge_repeats"] != judge_repeats:
-        return False
-    if methods is not None and meta["method"] not in methods:
-        return False
-    if result_names is not None and meta["result_name"] not in result_names:
-        return False
-    if run_indices is not None and meta["run_index"] not in run_indices:
-        return False
-    return True
+    max_retries = config.get("max_retries", 5)
+    if max_retries < 0:
+        raise ValueError("max_retries must be >= 0")
 
+    init_retry_delay = config.get("init_retry_delay", 1.0)
+    if init_retry_delay <= 0:
+        raise ValueError("init_retry_delay must be > 0")
 
-def _scored_path_from_meta(
-    meta: dict[str, Any],
-    evaluation_dir: Path | str | None = None,
-) -> Path:
-    return build_milestone_result_path(
-        edited_model=meta["model"],
-        editing_method=meta["method"],
-        milestones=meta["milestones"],
-        result_name=meta["result_name"],
-        run_index=meta["run_index"],
-        step=meta["step"],
-        n_runs=meta["n_runs"],
-        judge_repeats=meta["judge_repeats"],
-        result_group="scored",
-        evaluation_dir=evaluation_dir,
-    )
+    max_retry_delay = config.get("max_retry_delay", 30.0)
+    if max_retry_delay < init_retry_delay:
+        raise ValueError("max_retry_delay must be >= init_retry_delay")
 
+    model_config = config.get("model_config", {})
+    log_path = config.get("log_path")
+    keep_pbar = config.get("keep_pbar", False)
+    verbose = config.get("verbose", False)
 
-def _find_milestone_files(
-    model: str,
-    milestones: list[int],
-    n_runs: int,
-    judge_repeats: int,
-    result_group: str,
-    methods: Iterable[str] | None = None,
-    result_names: Iterable[str] | None = None,
-    run_indices: Iterable[int] | None = None,
-    evaluation_dir: Path | str | None = None,
-) -> list[Path]:
-    milestones = _normalize_milestones(milestones)
-    methods_set = _as_set(methods)
-    result_names_set = _as_set(result_names)
-    run_indices_set = _as_set(run_indices)
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    semaphore = asyncio.Semaphore(max_concurrency)
 
-    matched_paths: list[Path] = []
-    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
-    for path in root.rglob(f"{result_group}/*.json"):
-        parsed = load_result_file(path, evaluation_dir=evaluation_dir)
-        if parsed is None:
-            continue
-        meta, _ = parsed
-        if _matches_filter(
-            meta=meta,
-            model=model,
-            milestones=milestones,
-            n_runs=n_runs,
-            judge_repeats=judge_repeats,
-            methods=methods_set,
-            result_names=result_names_set,
-            run_indices=run_indices_set,
-            result_group=result_group,
-        ):
-            matched_paths.append(path)
+    async def _score_batch(batch: list[EvalRecord]) -> tuple[list[EvalRecord], int]:
+        async with semaphore:
+            request_model_config = build_judge_model_config(model_config, len(batch))
+            task_input = build_judge_task_input(batch)
 
-    return sorted(matched_paths)
+            try:
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a strict binary grading function."},
+                        {"role": "user", "content": JUDGE_PROMPT_TEMPLATE.format(task_input, len(batch))},
+                    ],
+                    **request_model_config,
+                )
+            except Exception as exc:
+                log_status(f"Judge request failed: {type(exc).__name__}: {exc}", log_path)
+                return batch, 0
 
+            content = completion.choices[0].message.content
+            if content is None:
+                log_status("Judge request returned empty content.", log_path)
+                return batch, 0
 
-def find_unscored_files(
-    model: str,
-    milestones: list[int],
-    n_runs: int,
-    judge_repeats: int,
-    methods: Iterable[str] | None = None,
-    result_names: Iterable[str] | None = None,
-    run_indices: Iterable[int] | None = None,
-    evaluation_dir: Path | str | None = None,
-) -> list[Path]:
-    return _find_milestone_files(
-        model=model,
-        milestones=milestones,
-        n_runs=n_runs,
-        judge_repeats=judge_repeats,
-        result_group="unscored",
-        methods=methods,
-        result_names=result_names,
-        run_indices=run_indices,
-        evaluation_dir=evaluation_dir,
-    )
+            lines = [line.strip() for line in content.strip().splitlines()]
+            ok = assign_judge_values(batch, lines)
+            if not ok:
+                log_status(
+                    "Judge response did not match output contract. "
+                    f"expected_lines={len(batch)} actual_lines={len(lines)}",
+                    log_path,
+                )
+                return batch, 0
 
+            return [], len(batch)
 
-def find_scored_files(
-    model: str,
-    milestones: list[int],
-    n_runs: int,
-    judge_repeats: int,
-    methods: Iterable[str] | None = None,
-    result_names: Iterable[str] | None = None,
-    run_indices: Iterable[int] | None = None,
-    evaluation_dir: Path | str | None = None,
-) -> list[Path]:
-    return _find_milestone_files(
-        model=model,
-        milestones=milestones,
-        n_runs=n_runs,
-        judge_repeats=judge_repeats,
-        result_group="scored",
-        methods=methods,
-        result_names=result_names,
-        run_indices=run_indices,
-        evaluation_dir=evaluation_dir,
-    )
+    async def _score_once(records: list[EvalRecord], repeat_index: int) -> list[float]:
+        pending_records = records
+        retry_count = -1
+        delay = 0
+
+        with tqdm(
+            total=len(records),
+            desc=f"LLM Judge Evaluation ({repeat_index + 1}/{repeats})",
+            unit="record",
+            leave=keep_pbar,
+        ) as pbar:
+            while pending_records and retry_count < max_retries:
+                await asyncio.sleep(delay)
+                log_status(
+                    f"Evaluating {len(pending_records)} records. "
+                    f"{max_retries - 1 - retry_count} retries left.",
+                    log_path,
+                    verbose=verbose,
+                    pbar=pbar,
+                )
+
+                tasks = [
+                    asyncio.create_task(_score_batch(list(batch)))
+                    for batch in batched(pending_records, batch_size)
+                ]
+
+                failed_records: list[EvalRecord] = []
+                for task in asyncio.as_completed(tasks):
+                    failed_batch, passed_count = await task
+                    failed_records.extend(failed_batch)
+                    pbar.update(passed_count)
+
+                pending_records = failed_records
+
+                retry_count += 1
+                delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
+
+                if pending_records:
+                    log_status(f"Failed records found. Retrying in {delay} seconds...", log_path, verbose=verbose, pbar=pbar)
+
+            for record in pending_records:
+                record.score = 1e-9
+
+            pbar.update(len(pending_records))
+
+        return [record.score for record in records]
+
+    repeated_scores = [await _score_once(records, i) for i in range(repeats)]
+    for idx, record in enumerate(records):
+        record.score = mean(scores[idx] for scores in repeated_scores)
 
 
 async def score_unscored_file(
@@ -203,7 +209,7 @@ async def score_unscored_file(
     if meta["result_group"] != "unscored":
         raise ValueError(f"Expected an unscored result file, got {meta['result_group']}: {path}")
 
-    scored_path = _scored_path_from_meta(meta, evaluation_dir=evaluation_dir)
+    scored_path = scored_path_from_meta(meta, evaluation_dir=evaluation_dir)
     if scored_path.exists() and not overwrite:
         return scored_path
 
@@ -240,7 +246,7 @@ def rebuild_perf_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> Path | None:
-    milestones = _normalize_milestones(milestones)
+    milestones = normalize_milestones(milestones)
     scored_records: list[dict[str, Any]] = []
     root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
     for path in root.rglob("scored/*.json"):
@@ -248,7 +254,7 @@ def rebuild_perf_results(
         if parsed is None:
             continue
         meta, payload = parsed
-        if not _matches_filter(
+        if not matches_filter(
             meta=meta,
             model=model,
             milestones=milestones,
@@ -281,7 +287,7 @@ def rebuild_perf_results(
     )
 
 
-def _rebuild_perf_for_scored_paths(
+def rebuild_perf_for_scored_paths(
     scored_paths: Iterable[Path],
     evaluation_dir: Path | str | None = None,
 ) -> list[Path]:
@@ -320,144 +326,6 @@ def _rebuild_perf_for_scored_paths(
     return perf_paths
 
 
-def _existing_scored_path_for_unscored(
-    path: Path,
-    evaluation_dir: Path | str | None = None,
-) -> Path | None:
-    parsed = load_result_file(path, evaluation_dir=evaluation_dir)
-    if parsed is None:
-        return None
-    meta, _ = parsed
-    if meta["result_group"] != "unscored":
-        return None
-    return _scored_path_from_meta(meta, evaluation_dir=evaluation_dir)
-
-
-def _expected_scored_paths(
-    model: str,
-    milestones: list[int],
-    n_runs: int,
-    judge_repeats: int,
-    methods: Iterable[str] | None,
-    result_names: Iterable[str] | None,
-    run_indices: Iterable[int] | None,
-    evaluation_dir: Path | str | None = None,
-) -> list[Path] | None:
-    if methods is None or result_names is None:
-        return None
-
-    milestones = _normalize_milestones(milestones)
-    runs = list(run_indices) if run_indices is not None else list(range(1, n_runs + 1))
-
-    return [
-        build_milestone_result_path(
-            edited_model=model,
-            editing_method=method,
-            milestones=milestones,
-            result_name=result_name,
-            run_index=run_index,
-            step=step,
-            n_runs=n_runs,
-            judge_repeats=judge_repeats,
-            result_group="scored",
-            evaluation_dir=evaluation_dir,
-        )
-        for method in methods
-        for result_name in result_names
-        for run_index in runs
-        for step in milestones
-    ]
-
-
-def _missing_paths(paths: Iterable[Path]) -> list[Path]:
-    return [path for path in paths if not path.exists()]
-
-
-def _base_scored_dir(
-    model: str,
-    judge_repeats: int,
-    evaluation_dir: Path | str | None = None,
-) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
-    return root / model / "base" / "scored" / f"j{judge_repeats}"
-
-
-def _base_scored_path(
-    model: str,
-    result_name: str,
-    judge_repeats: int,
-    evaluation_dir: Path | str | None = None,
-) -> Path:
-    return _base_scored_dir(model, judge_repeats, evaluation_dir=evaluation_dir) / f"{result_name}.json"
-
-
-def _base_result_names(
-    model: str,
-    judge_repeats: int,
-    evaluation_dir: Path | str | None = None,
-) -> list[str]:
-    scored_dir = _base_scored_dir(model, judge_repeats, evaluation_dir=evaluation_dir)
-    if not scored_dir.exists():
-        return []
-    return sorted(path.stem for path in scored_dir.glob("*.json") if path.is_file())
-
-
-def _metric_score(details: list[dict[str, Any]]) -> float:
-    return mean(float(record.get("score", 0)) for record in details) if details else 0
-
-
-def _slice_base_metric(
-    metric_payload: dict[str, Any] | None,
-    selected_indices: list[int],
-    step: int,
-    dataset_rows: int,
-    result_name: str,
-    metric_name: str,
-) -> dict[str, Any] | None:
-    if metric_payload is None:
-        return None
-
-    details = list(metric_payload.get("details", []))
-    if dataset_rows <= 0:
-        raise ValueError(f"Invalid baseline dataset_rows={dataset_rows} for result={result_name}")
-    if len(details) % dataset_rows != 0:
-        raise ValueError(
-            f"Cannot slice baseline result={result_name} metric={metric_name}: "
-            f"details={len(details)} is not divisible by dataset_rows={dataset_rows}"
-        )
-
-    records_per_row = len(details) // dataset_rows
-    sliced_details: list[dict[str, Any]] = []
-    for row_index in selected_indices[:step]:
-        start = row_index * records_per_row
-        sliced_details.extend(details[start:start + records_per_row])
-
-    return {
-        "score": _metric_score(sliced_details),
-        "details": sliced_details,
-    }
-
-
-def _slice_base_result(
-    result_payload: dict[str, Any],
-    selected_indices: list[int],
-    step: int,
-    dataset_rows: int,
-    result_name: str,
-) -> dict[str, Any]:
-    return {
-        metric_name: _slice_base_metric(
-            result_payload.get(metric_name),
-            selected_indices=selected_indices,
-            step=step,
-            dataset_rows=dataset_rows,
-            result_name=result_name,
-            metric_name=metric_name,
-        )
-        for metric_name in ("success", "locality", "portability")
-    }
-
-
 def materialize_base_perf_results(
     model: str,
     milestones: list[int],
@@ -470,16 +338,16 @@ def materialize_base_perf_results(
     log_path: Path | str | None = None,
     verbose: bool = False,
 ) -> list[Path]:
-    milestones = _normalize_milestones(milestones)
+    milestones = normalize_milestones(milestones)
     runs = list(run_indices) if run_indices is not None else list(range(1, n_runs + 1))
-    names = list(result_names) if result_names is not None else _base_result_names(
+    names = list(result_names) if result_names is not None else base_result_names(
         model=model,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
     )
 
     if not names:
-        _log_worker(
+        log_status(
             "[base-skip] "
             f"model={model} "
             f"judge_repeats={judge_repeats} "
@@ -491,14 +359,14 @@ def materialize_base_perf_results(
 
     perf_paths: list[Path] = []
     for result_name in names:
-        scored_path = _base_scored_path(
+        scored_path = base_scored_path(
             model=model,
             result_name=result_name,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
         )
         if not scored_path.exists():
-            _log_worker(
+            log_status(
                 "[base-skip] "
                 f"model={model} "
                 f"result={result_name} "
@@ -514,7 +382,7 @@ def materialize_base_perf_results(
             payload = json.load(file)
 
         if payload.get("base_limit") is not None:
-            _log_worker(
+            log_status(
                 "[base-skip] "
                 f"model={model} "
                 f"result={result_name} "
@@ -531,7 +399,7 @@ def materialize_base_perf_results(
 
         dataset_rows = int(payload.get("dataset_rows") or len(payload.get("edits", [])))
         if milestones[-1] > dataset_rows:
-            _log_worker(
+            log_status(
                 "[base-skip] "
                 f"model={model} "
                 f"result={result_name} "
@@ -558,7 +426,7 @@ def materialize_base_perf_results(
                 step_indices = selected_indices[:step]
                 record = {
                     "step": step,
-                    "result": _slice_base_result(
+                    "result": slice_base_result(
                         result_payload=result_payload,
                         selected_indices=selected_indices,
                         step=step,
@@ -582,7 +450,7 @@ def materialize_base_perf_results(
                 evaluation_dir=evaluation_dir,
             )
             perf_paths.append(perf_path)
-            _log_worker(
+            log_status(
                 "[base-perf-rebuilt] "
                 f"model={model} "
                 f"result={result_name} "
@@ -619,13 +487,17 @@ async def score_pending_unscored(
     if poll_interval <= 0:
         raise ValueError("poll_interval must be > 0")
 
+    methods = list(methods) if methods is not None else None
+    result_names = list(result_names) if result_names is not None else None
+    run_indices = list(run_indices) if run_indices is not None else None
+
     all_scored_paths: list[Path] = []
     idle_polls = 0
     existing_scored_rebuilt = False
     active_tasks: dict[asyncio.Task[Path], Path] = {}
     log_path = judge_config.get("worker_log_path", judge_config.get("log_path"))
     worker_verbose = bool(judge_config.get("verbose", False) if verbose is None else verbose)
-    expected_scored_paths = _expected_scored_paths(
+    expected_paths = expected_scored_paths(
         model=model,
         milestones=milestones,
         n_runs=n_runs,
@@ -636,16 +508,16 @@ async def score_pending_unscored(
         evaluation_dir=evaluation_dir,
     )
 
-    _log_worker(
+    log_status(
         "[worker-start] "
         f"model={model} "
-        f"milestones={_normalize_milestones(milestones)} "
+        f"milestones={normalize_milestones(milestones)} "
         f"n_runs={n_runs} "
         f"judge_repeats={judge_repeats} "
         f"file_concurrency={file_concurrency} "
         f"watch={watch} "
         f"stop_when_complete={stop_when_complete} "
-        f"expected_files={len(expected_scored_paths) if expected_scored_paths is not None else 'unknown'}",
+        f"expected_files={len(expected_paths) if expected_paths is not None else 'unknown'}",
         log_path,
         worker_verbose,
     )
@@ -679,7 +551,7 @@ async def score_pending_unscored(
         for path in unscored_paths:
             if path.resolve() in active_paths:
                 continue
-            scored_path = _existing_scored_path_for_unscored(path, evaluation_dir=evaluation_dir)
+            scored_path = existing_scored_path_for_unscored(path, evaluation_dir=evaluation_dir)
             if scored_path is None:
                 continue
             if overwrite or not scored_path.exists():
@@ -687,15 +559,15 @@ async def score_pending_unscored(
         return pending_paths
 
     async def _score_path(path: Path) -> Path:
-        label = _format_file_label(path, evaluation_dir=evaluation_dir)
-        _log_worker(f"[score-start] {label} path={path}", log_path, worker_verbose)
+        label = format_file_label(path, evaluation_dir=evaluation_dir)
+        log_status(f"[score-start] {label} path={path}", log_path, worker_verbose)
         scored_path = await score_unscored_file(
             path=path,
             judge_config=judge_config,
             evaluation_dir=evaluation_dir,
             overwrite=overwrite,
         )
-        _log_worker(f"[score-done] {label} scored={scored_path}", log_path, worker_verbose)
+        log_status(f"[score-done] {label} scored={scored_path}", log_path, worker_verbose)
         return scored_path
 
     while True:
@@ -703,13 +575,13 @@ async def score_pending_unscored(
             watch
             and stop_when_complete
             and not active_tasks
-            and expected_scored_paths is not None
+            and expected_paths is not None
         ):
-            missing_paths = _missing_paths(expected_scored_paths)
-            if not missing_paths:
-                _log_worker(
+            missing = missing_paths(expected_paths)
+            if not missing:
+                log_status(
                     "[complete] "
-                    f"expected_scored_files={len(expected_scored_paths)}",
+                    f"expected_scored_files={len(expected_paths)}",
                     log_path,
                     worker_verbose,
                 )
@@ -723,7 +595,7 @@ async def score_pending_unscored(
 
         if paths_to_start:
             idle_polls = 0
-            _log_worker(
+            log_status(
                 "[scheduled] "
                 f"started={len(paths_to_start)} "
                 f"active={len(active_tasks)} "
@@ -747,7 +619,7 @@ async def score_pending_unscored(
                 try:
                     scored_path = task.result()
                 except Exception as exc:
-                    _log_worker(
+                    log_status(
                         "[score-error] "
                         f"path={source_path} "
                         f"error={type(exc).__name__}: {exc}",
@@ -758,9 +630,9 @@ async def score_pending_unscored(
                 scored_paths.append(scored_path)
 
             all_scored_paths.extend(scored_paths)
-            perf_paths = _rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
+            perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
             for perf_path in perf_paths:
-                _log_worker(f"[perf-rebuilt] path={perf_path}", log_path, worker_verbose)
+                log_status(f"[perf-rebuilt] path={perf_path}", log_path, worker_verbose)
             continue
 
         else:
@@ -776,17 +648,17 @@ async def score_pending_unscored(
                     evaluation_dir=evaluation_dir,
                 )
                 if scored_paths:
-                    perf_paths = _rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
+                    perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
                     for perf_path in perf_paths:
-                        _log_worker(f"[perf-rebuilt-existing] path={perf_path}", log_path, worker_verbose)
+                        log_status(f"[perf-rebuilt-existing] path={perf_path}", log_path, worker_verbose)
                 existing_scored_rebuilt = True
 
             idle_polls += 1
             if idle_polls == 1 or idle_polls % 30 == 0:
                 missing_count = None
-                if expected_scored_paths is not None:
-                    missing_count = len(_missing_paths(expected_scored_paths))
-                _log_worker(
+                if expected_paths is not None:
+                    missing_count = len(missing_paths(expected_paths))
+                log_status(
                     "[idle] "
                     f"idle_polls={idle_polls} "
                     f"watch={watch} "
@@ -803,7 +675,7 @@ async def score_pending_unscored(
         if not watch:
             break
 
-    _log_worker(
+    log_status(
         "[worker-stop] "
         f"scored_files={len(all_scored_paths)} "
         f"idle_polls={idle_polls}",
@@ -811,58 +683,3 @@ async def score_pending_unscored(
         worker_verbose,
     )
     return all_scored_paths
-
-
-def _load_judge_config(path: Path) -> dict[str, Any]:
-    with open(path, encoding="utf-8") as file:
-        return json.load(file)
-
-
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Score pending unscored evaluation snapshots.")
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--milestones", nargs="+", type=int, required=True)
-    parser.add_argument("--n-runs", type=int, required=True)
-    parser.add_argument("--judge-repeats", type=int, required=True)
-    parser.add_argument("--base-seed", type=int, default=0)
-    parser.add_argument("--judge-config", type=Path, required=True)
-    parser.add_argument("--method", dest="methods", action="append")
-    parser.add_argument("--result-name", dest="result_names", action="append")
-    parser.add_argument("--run-index", dest="run_indices", action="append", type=int)
-    parser.add_argument("--evaluation-dir", type=Path, default=EVALUATION_DIR)
-    parser.add_argument("--file-concurrency", type=int, default=1)
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--watch", action="store_true")
-    parser.add_argument("--poll-interval", type=float, default=10.0)
-    parser.add_argument("--max-idle-polls", type=int)
-    parser.add_argument("--no-stop-when-complete", action="store_true")
-    parser.add_argument("--verbose", action="store_true", default=None)
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = _parse_args()
-    judge_config = _load_judge_config(args.judge_config)
-    asyncio.run(score_pending_unscored(
-        model=args.model,
-        milestones=args.milestones,
-        n_runs=args.n_runs,
-        judge_repeats=args.judge_repeats,
-        judge_config=judge_config,
-        base_seed=args.base_seed,
-        methods=args.methods,
-        result_names=args.result_names,
-        run_indices=args.run_indices,
-        evaluation_dir=args.evaluation_dir,
-        file_concurrency=args.file_concurrency,
-        overwrite=args.overwrite,
-        watch=args.watch,
-        poll_interval=args.poll_interval,
-        max_idle_polls=args.max_idle_polls,
-        stop_when_complete=not args.no_stop_when_complete,
-        verbose=args.verbose,
-    ))
-
-
-if __name__ == "__main__":
-    main()

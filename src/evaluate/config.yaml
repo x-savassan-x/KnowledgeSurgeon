@@ -1,5 +1,5 @@
-# Shared evaluation config for edit.ipynb and eval.ipynb.
-# Change this file to keep producer and judge-worker settings aligned.
+# Shared evaluation config for generation.ipynb, judge.ipynb, and hardware.ipynb.
+# Change this file to keep producer, judge, and hardware settings aligned.
 
 model_name: qwen2.5-7b
 

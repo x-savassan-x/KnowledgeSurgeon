@@ -44,13 +44,51 @@ def build_method_dir(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
+    return build_experiment_dir(
+        edited_model=edited_model,
+        milestones=milestones,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    ) / editing_method
+
+
+def build_experiment_dir(
+    edited_model: str,
+    milestones: list[int],
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> Path:
     root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     return (
         root
         / edited_model
         / milestones_to_str(milestones)
         / run_setting_to_str(n_runs, judge_repeats)
-        / editing_method
+    )
+
+
+def build_hardware_path(
+    edited_model: str,
+    milestones: list[int],
+    run_index: int,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> Path:
+    if run_index <= 0:
+        raise ValueError("run_index must be > 0")
+    return (
+        build_experiment_dir(
+            edited_model=edited_model,
+            milestones=milestones,
+            n_runs=n_runs,
+            judge_repeats=judge_repeats,
+            evaluation_dir=evaluation_dir,
+        )
+        / "hardware"
+        / f"run_{run_index}.json"
     )
 
 
@@ -264,6 +302,50 @@ def save_memory_results(
     return path
 
 
+def save_hardware_results(
+    hardware: dict[str, Any],
+    edited_model: str,
+    milestones: list[int],
+    run_index: int,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> Path:
+    path = build_hardware_path(
+        edited_model=edited_model,
+        milestones=milestones,
+        run_index=run_index,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    _write_json(path, hardware)
+
+    return path
+
+
+def load_hardware_results(
+    edited_model: str,
+    milestones: list[int],
+    run_index: int,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> dict[str, Any] | None:
+    path = build_hardware_path(
+        edited_model=edited_model,
+        milestones=milestones,
+        run_index=run_index,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as file:
+        return json.load(file)
+
+
 def iter_result_files(evaluation_dir: Path | str | None = None) -> list[Path]:
     root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     if not root.exists():
@@ -285,6 +367,44 @@ def load_result_file(
         return None
 
     parts = relative.parts
+    if len(parts) == 5:
+        edited_model, milestones_str, run_setting, result_group, filename = parts
+        if result_group != "hardware" or not filename.endswith(".json"):
+            return None
+
+        try:
+            milestones = [int(step) for step in milestones_str.split("-")]
+            milestones = _normalize_milestones(milestones)
+        except ValueError:
+            return None
+
+        match = re.fullmatch(r"r(\d+)-j(\d+)", run_setting)
+        if match is None:
+            return None
+        n_runs = int(match.group(1))
+        judge_repeats = int(match.group(2))
+
+        stem = filename[:-5]
+        match = re.fullmatch(r"run_(\d+)", stem)
+        if match is None:
+            return None
+        run_index = int(match.group(1))
+
+        with open(path, encoding="utf-8") as file:
+            payload = json.load(file)
+
+        meta = {
+            "model": edited_model,
+            "method": None,
+            "milestones": milestones,
+            "n_runs": n_runs,
+            "judge_repeats": judge_repeats,
+            "result_group": result_group,
+            "result_name": "hardware",
+            "run_index": run_index,
+        }
+        return meta, payload
+
     if len(parts) != 6:
         return None
 
