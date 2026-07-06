@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from .io import (
     EVALUATION_DIR,
+    build_result_path,
     load_result_file,
     save_benchmark_results,
     save_scored_results,
@@ -337,6 +338,7 @@ def materialize_base_perf_results(
     evaluation_dir: Path | str | None = None,
     log_path: Path | str | None = None,
     verbose: bool = False,
+    overwrite: bool = False,
 ) -> list[Path]:
     milestones = normalize_milestones(milestones)
     runs = list(run_indices) if run_indices is not None else list(range(1, n_runs + 1))
@@ -419,6 +421,30 @@ def materialize_base_perf_results(
             )
 
         for run_index in runs:
+            perf_path = build_result_path(
+                edited_model=model,
+                editing_method="base",
+                milestones=milestones,
+                result_name=result_name,
+                run_index=run_index,
+                n_runs=n_runs,
+                judge_repeats=judge_repeats,
+                result_group="perf",
+                evaluation_dir=evaluation_dir,
+            )
+            if perf_path.exists() and not overwrite:
+                perf_paths.append(perf_path)
+                log_status(
+                    "[base-perf-exists] "
+                    f"model={model} "
+                    f"result={result_name} "
+                    f"run={run_index}/{n_runs} "
+                    f"path={perf_path}",
+                    log_path,
+                    verbose,
+                )
+                continue
+
             selected_indices = list(range(dataset_rows))
             Random(base_seed + run_index - 1).shuffle(selected_indices)
             records = []
@@ -463,13 +489,60 @@ def materialize_base_perf_results(
     return perf_paths
 
 
+def rebuild_perf_from_scored(
+    model: str,
+    milestones: list[int],
+    n_runs: int,
+    judge_repeats: int,
+    methods: Iterable[str] | None = None,
+    result_names: Iterable[str] | None = None,
+    run_indices: Iterable[int] | None = None,
+    evaluation_dir: Path | str | None = None,
+    log_path: Path | str | None = None,
+    verbose: bool = False,
+) -> list[Path]:
+    scored_paths = find_scored_files(
+        model=model,
+        milestones=milestones,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        methods=methods,
+        result_names=result_names,
+        run_indices=run_indices,
+        evaluation_dir=evaluation_dir,
+    )
+    if not scored_paths:
+        log_status(
+            "[perf-rebuild-skip] "
+            f"model={model} "
+            f"milestones={normalize_milestones(milestones)} "
+            f"n_runs={n_runs} "
+            f"judge_repeats={judge_repeats} "
+            "reason=no_scored_files",
+            log_path,
+            verbose,
+        )
+        return []
+
+    perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
+    log_status(
+        "[perf-rebuilt] "
+        f"scored_files={len(scored_paths)} "
+        f"perf_files={len(perf_paths)}",
+        log_path,
+        verbose,
+    )
+    for perf_path in perf_paths:
+        log_status(f"[perf-path] {perf_path}", log_path, verbose)
+    return perf_paths
+
+
 async def score_pending_unscored(
     model: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
     judge_config: dict[str, Any],
-    base_seed: int = 0,
     methods: Iterable[str] | None = None,
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
@@ -493,7 +566,6 @@ async def score_pending_unscored(
 
     all_scored_paths: list[Path] = []
     idle_polls = 0
-    existing_scored_rebuilt = False
     active_tasks: dict[asyncio.Task[Path], Path] = {}
     log_path = judge_config.get("worker_log_path", judge_config.get("log_path"))
     worker_verbose = bool(judge_config.get("verbose", False) if verbose is None else verbose)
@@ -520,19 +592,6 @@ async def score_pending_unscored(
         f"expected_files={len(expected_paths) if expected_paths is not None else 'unknown'}",
         log_path,
         worker_verbose,
-    )
-
-    materialize_base_perf_results(
-        model=model,
-        milestones=milestones,
-        n_runs=n_runs,
-        judge_repeats=judge_repeats,
-        base_seed=base_seed,
-        result_names=result_names,
-        run_indices=run_indices,
-        evaluation_dir=evaluation_dir,
-        log_path=log_path,
-        verbose=worker_verbose,
     )
 
     def _find_pending_paths() -> list[Path]:
@@ -630,29 +689,9 @@ async def score_pending_unscored(
                 scored_paths.append(scored_path)
 
             all_scored_paths.extend(scored_paths)
-            perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
-            for perf_path in perf_paths:
-                log_status(f"[perf-rebuilt] path={perf_path}", log_path, worker_verbose)
             continue
 
         else:
-            if not existing_scored_rebuilt:
-                scored_paths = find_scored_files(
-                    model=model,
-                    milestones=milestones,
-                    n_runs=n_runs,
-                    judge_repeats=judge_repeats,
-                    methods=methods,
-                    result_names=result_names,
-                    run_indices=run_indices,
-                    evaluation_dir=evaluation_dir,
-                )
-                if scored_paths:
-                    perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
-                    for perf_path in perf_paths:
-                        log_status(f"[perf-rebuilt-existing] path={perf_path}", log_path, worker_verbose)
-                existing_scored_rebuilt = True
-
             idle_polls += 1
             if idle_polls == 1 or idle_polls % 30 == 0:
                 missing_count = None

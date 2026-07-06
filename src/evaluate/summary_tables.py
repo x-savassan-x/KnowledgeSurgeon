@@ -3,14 +3,12 @@ from typing import Any
 
 import pandas as pd
 
-from .io import build_hardware_path, build_milestone_result_path, build_result_path, load_hardware_results
+from .io import build_milestone_result_path, build_result_path, load_hardware_results
 from .summary_utils import (
     METRIC_ORDER,
     _composite_series,
-    _final_milestone_value,
     _format_mean_std,
     _format_seconds_mean_std,
-    _load_composite_finals,
     _load_results_with_skips,
     _normalize_milestones,
     _ordered_method_names,
@@ -92,6 +90,7 @@ def table_time_results(
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
+    methods = _edit_methods_only(methods)
     data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
@@ -122,26 +121,22 @@ def table_composite_results(
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
+    methods = _edit_methods_only(methods)
     data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
-    final_data = _load_composite_finals(data)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
         return pd.DataFrame()
 
-    columns = [f"step {step}" for step in milestones] + ["Final"]
+    columns = [f"step {step}" for step in milestones]
     table_data: dict[str, list[str]] = {}
     for method_name in _ordered_method_names(data, methods):
         composite_values = _composite_series(data[method_name])
         composite_stds = _std_series_for_metric(data[method_name], "composite")
-        row = [
+        table_data[method_name] = [
             _format_mean_std(value, std)
             for value, std in zip(composite_values, composite_stds)
         ]
-        final_value = final_data[method_name]
-        final_std = _final_milestone_value(composite_stds)
-        row.append(_format_mean_std(final_value, final_std))
-        table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
@@ -158,6 +153,7 @@ def table_memory_results(
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
+    methods = _edit_methods_only(methods)
     data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
@@ -190,6 +186,10 @@ def table_memory_results(
     df.index.name = "method"
     print(f"peak edit memory | model={model} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
+
+
+def _edit_methods_only(methods: list[str]) -> list[str]:
+    return [method_name for method_name in methods if method_name != "base"]
 
 
 def _hardware_gpu_label(payload: dict[str, Any] | None) -> str:
@@ -241,6 +241,81 @@ def _hardware_first_gpu_field(payload: dict[str, Any] | None, field: str) -> str
     return "-"
 
 
+def _hardware_pcie_label(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    provider_label = _hardware_metadata_field(
+        payload,
+        (
+            "provider_reported_pcie",
+            "pcie_label",
+            "pcie",
+        ),
+    )
+    if provider_label != "-":
+        return provider_label
+    gpu_payload = payload.get("gpu", {})
+    gpus = gpu_payload.get("gpus", []) if isinstance(gpu_payload, dict) else []
+    for gpu in gpus:
+        if not isinstance(gpu, dict):
+            continue
+        gen = gpu.get("pcie_link_gen_current")
+        width = gpu.get("pcie_link_width_current")
+        if gen is not None and width is not None:
+            return f"gen{gen} x{width}"
+    return "-"
+
+
+def _format_hardware_value(value: Any, suffix: str = "") -> str:
+    if value in (None, ""):
+        return "-"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number:g}{suffix}"
+
+
+def _hardware_metadata_field(
+    payload: dict[str, Any] | None,
+    keys: tuple[str, ...],
+    suffix: str = "",
+) -> str:
+    if not payload:
+        return "-"
+    for section_name in ("manual", "provider_env"):
+        section = payload.get(section_name, {})
+        if not isinstance(section, dict):
+            continue
+        for key in keys:
+            if key in section:
+                return _format_hardware_value(section.get(key), suffix=suffix)
+    return "-"
+
+
+def _hardware_torch_label(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    torch_payload = payload.get("torch", {})
+    if not isinstance(torch_payload, dict):
+        return "-"
+    version = torch_payload.get("version")
+    cuda_version = torch_payload.get("cuda_version")
+    if version and cuda_version:
+        return f"{version} / CUDA {cuda_version}"
+    return str(version or cuda_version or "-")
+
+
+def _hardware_python_label(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    python_payload = payload.get("python", {})
+    if not isinstance(python_payload, dict):
+        return "-"
+    version = str(python_payload.get("version", "-"))
+    return version.split()[0] if version else "-"
+
+
 def table_hardware_results(
     model: str,
     milestones: list[int],
@@ -259,23 +334,47 @@ def table_hardware_results(
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
         )
-        path = build_hardware_path(
-            edited_model=model,
-            milestones=milestones,
-            run_index=run_index,
-            n_runs=n_runs,
-            judge_repeats=judge_repeats,
-            evaluation_dir=evaluation_dir,
-        )
         rows.append({
             "run": run_index,
-            "status": "present" if payload is not None else "missing",
-            "captured_at": payload.get("captured_at", "-") if payload else "-",
-            "hostname": payload.get("hostname", "-") if payload else "-",
             "gpu": _hardware_gpu_label(payload),
             "gpu memory": _hardware_gpu_memory(payload),
+            "gpu tflops": _hardware_metadata_field(
+                payload,
+                (
+                    "provider_reported_tflops",
+                    "gpu_tflops",
+                    "tflops",
+                    "fp16_tflops",
+                    "gpu_fp16_tflops",
+                ),
+            ),
+            "vram bw": _hardware_metadata_field(
+                payload,
+                (
+                    "provider_reported_vram_bandwidth_gbps",
+                    "gpu_mem_bandwidth_gbps",
+                    "memory_bandwidth_gbps",
+                    "vram_bandwidth_gbps",
+                ),
+                suffix=" GB/s",
+            ),
+            "pcie": _hardware_pcie_label(payload),
+            "pcie bw": _hardware_metadata_field(
+                payload,
+                (
+                    "provider_reported_pcie_bandwidth_gbps",
+                    "pcie_bandwidth_gbps",
+                ),
+                suffix=" GB/s",
+            ),
+            "dlperf": _hardware_metadata_field(
+                payload,
+                (
+                    "provider_reported_dlperf",
+                    "dlperf",
+                ),
+            ),
             "driver": _hardware_first_gpu_field(payload, "driver_version"),
-            "torch cuda": payload.get("torch", {}).get("cuda_version", "-") if payload else "-",
             "cpu": payload.get("cpu", {}).get("model", "-") if payload else "-",
             "cpu count": payload.get("cpu", {}).get("logical_count", "-") if payload else "-",
             "ram": (
@@ -283,7 +382,8 @@ def table_hardware_results(
                 if payload and payload.get("memory", {}).get("memtotal_gb") is not None
                 else "-"
             ),
-            "path": str(path),
+            "torch": _hardware_torch_label(payload),
+            "python": _hardware_python_label(payload),
         })
 
     df = pd.DataFrame(rows)
@@ -300,7 +400,7 @@ def audit_result_grid(
     result_names: list[str] | None = None,
     result_groups: list[str] | None = None,
     evaluation_dir: Path | str | None = None,
-    only_problems: bool = True,
+    only_problems: bool = False,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     result_names = result_names or ["es_loc", "port"]
@@ -309,12 +409,14 @@ def audit_result_grid(
     rows: list[dict[str, Any]] = []
 
     for method_name in methods:
-        for result_group in result_groups:
+        method_groups = ["perf"] if method_name == "base" else result_groups
+        for result_group in method_groups:
+            expected_paths: list[Path] = []
             for result_name in result_names:
                 for run_index in runs:
                     if result_group in {"unscored", "scored"}:
-                        for step in milestones:
-                            path = build_milestone_result_path(
+                        expected_paths.extend(
+                            build_milestone_result_path(
                                 edited_model=model,
                                 editing_method=method_name,
                                 milestones=milestones,
@@ -326,52 +428,47 @@ def audit_result_grid(
                                 result_group=result_group,
                                 evaluation_dir=evaluation_dir,
                             )
-                            exists = path.exists()
-                            size = path.stat().st_size if exists else None
-                            status = "present" if exists and size else "empty" if exists else "missing"
-                            rows.append({
-                                "method": method_name,
-                                "group": result_group,
-                                "result": result_name,
-                                "run": run_index,
-                                "step": step,
-                                "status": status,
-                                "path": str(path),
-                            })
-                    else:
-                        path = build_result_path(
-                            edited_model=model,
-                            editing_method=method_name,
-                            milestones=milestones,
-                            result_name=result_name,
-                            run_index=run_index,
-                            n_runs=n_runs,
-                            judge_repeats=judge_repeats,
-                            result_group=result_group,
-                            evaluation_dir=evaluation_dir,
+                            for step in milestones
                         )
-                        exists = path.exists()
-                        size = path.stat().st_size if exists else None
-                        status = "present" if exists and size else "empty" if exists else "missing"
-                        rows.append({
-                            "method": method_name,
-                            "group": result_group,
-                            "result": result_name,
-                            "run": run_index,
-                            "step": None,
-                            "status": status,
-                            "path": str(path),
-                        })
+                    else:
+                        expected_paths.append(
+                            build_result_path(
+                                edited_model=model,
+                                editing_method=method_name,
+                                milestones=milestones,
+                                result_name=result_name,
+                                run_index=run_index,
+                                n_runs=n_runs,
+                                judge_repeats=judge_repeats,
+                                result_group=result_group,
+                                evaluation_dir=evaluation_dir,
+                            )
+                        )
+
+            present = 0
+            missing_files: list[str] = []
+            for path in expected_paths:
+                if path.exists() and path.stat().st_size > 0:
+                    present += 1
+                    continue
+                suffix = " (empty)" if path.exists() else ""
+                missing_files.append(f"{path.name}{suffix}")
+
+            rows.append({
+                "method": method_name,
+                "group": result_group,
+                "expected": len(expected_paths),
+                "present": present,
+                "missing": len(missing_files),
+                "missing files": ", ".join(missing_files) if missing_files else "",
+            })
 
     df = pd.DataFrame(rows)
-    summary = df.groupby(["method", "group", "status"]).size().unstack(fill_value=0)
     print(f"result-grid audit | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
-    if not summary.empty:
-        print(summary)
 
     if only_problems:
-        problem_df = df[df["status"] != "present"].reset_index(drop=True)
+        problem_df = df[df["missing"] > 0].reset_index(drop=True)
         if problem_df.empty:
             print("No missing or empty files found for the selected grid.")
-        return problem_df
-    return df
+        return _centered_style(problem_df)
+    return _centered_style(df)
