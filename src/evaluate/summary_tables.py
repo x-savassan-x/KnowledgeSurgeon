@@ -20,10 +20,16 @@ from .summary_utils import (
 )
 
 
-def _centered_style(df: pd.DataFrame):
-    return df.style.set_properties(**{"text-align": "center"}).set_table_styles(
+def _centered_style(df: pd.DataFrame, hide_index: bool = False):
+    style = df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [dict(selector="th", props=[("text-align", "center")])]
     )
+    if not hide_index:
+        return style
+    try:
+        return style.hide(axis="index")
+    except TypeError:
+        return style.hide_index()
 
 
 def table_perf_results(
@@ -388,7 +394,7 @@ def table_hardware_results(
 
     df = pd.DataFrame(rows)
     print(f"hardware | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
-    return _centered_style(df)
+    return _centered_style(df, hide_index=True)
 
 
 def audit_result_grid(

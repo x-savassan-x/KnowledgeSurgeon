@@ -25,14 +25,25 @@ from .summary_utils import (
 
 
 METHOD_COLOR_PALETTE = {
-    "base": "#7A7A7A",
-    "ft": "#0072B2",
-    "rome": "#E69F00",
-    "r_rome": "#D55E00",
-    "grace": "#009E73",
-    "wise": "#56B4E9",
-    "alpha_edit": "#CC79A7",
-    "mnemo": "#6F4E7C",
+    "base": "#5F5F5F",
+    "ft": "#1F77B4",
+    "rome": "#FF7F0E",
+    "grace": "#2CA02C",
+    "r_rome": "#D62728",
+    "wise": "#17BECF",
+    "alpha_edit": "#9467BD",
+    "mnemo": "#8C564B",
+}
+
+METHOD_MARKERS = {
+    "base": "o",
+    "ft": "s",
+    "rome": "^",
+    "grace": "D",
+    "r_rome": "v",
+    "wise": "P",
+    "alpha_edit": "X",
+    "mnemo": "*",
 }
 
 
@@ -49,6 +60,14 @@ def _method_colors(methods_sorted: list[str]) -> dict[str, Any]:
     for index, method_name in enumerate(extra_methods):
         palette[method_name] = cmap(index % max(1, len(cmap.colors)))
     return {method_name: palette[method_name] for method_name in methods_sorted}
+
+
+def _method_marker(method_name: str) -> str:
+    return METHOD_MARKERS.get(method_name, "o")
+
+
+def _metric_label(short_name: str, metric_name: str) -> str:
+    return "H-mean" if metric_name == "quality" else short_name
 
 
 def _edit_methods_only(methods: list[str]) -> list[str]:
@@ -91,7 +110,33 @@ def _plot_std_band(
         lower = [max(lower_bound, value) for value in lower]
     if upper_bound is not None:
         upper = [min(upper_bound, value) for value in upper]
-    ax.fill_between(band_xs, lower, upper, color=color, alpha=0.14, linewidth=0)
+    ax.fill_between(band_xs, lower, upper, color=color, alpha=0.08, linewidth=0)
+
+
+def _adaptive_score_ylim(
+    values: list[float],
+    stds: list[float | None] | None = None,
+    lower_bound: float = 0.0,
+    upper_bound: float = 1.05,
+    pad_ratio: float = 0.12,
+    min_span: float = 0.04,
+) -> tuple[float, float]:
+    if not values:
+        return lower_bound, upper_bound
+
+    stds = stds or [None] * len(values)
+    lows: list[float] = []
+    highs: list[float] = []
+    for value, std in zip(values, stds):
+        spread = float(std) if std is not None else 0.0
+        lows.append(float(value) - spread)
+        highs.append(float(value) + spread)
+
+    low = max(lower_bound, min(lows))
+    high = min(upper_bound, max(highs))
+    span = max(high - low, min_span)
+    pad = span * pad_ratio
+    return max(lower_bound, low - pad), min(upper_bound, high + pad)
 
 
 def plot_perf_results(
@@ -148,8 +193,8 @@ def plot_perf_results(
             line_ax.plot(
                 milestone_positions,
                 values,
-                marker="o",
-                markersize=4,
+                marker=_method_marker(method_name),
+                markersize=4.5,
                 color=method_colors[method_name],
                 **_line_style_for_method(method_name),
             )
@@ -162,8 +207,8 @@ def plot_perf_results(
         _set_milestone_ticks(line_ax, milestones)
         line_ax.set_xlabel("checkpoint")
         line_ax.set_ylabel("score")
-        line_title = "H-Mean Sequential" if metric_name == "quality" else f"{short_name} Sequential"
-        line_ax.set_title(line_title, fontweight="bold")
+        metric_label = _metric_label(short_name, metric_name)
+        line_ax.set_title(f"sequential {metric_label}", fontweight="bold")
         line_ax.grid(alpha=0.25)
 
         values, stds = _final_values_and_stds(data, methods_sorted, metric_name)
@@ -188,10 +233,9 @@ def plot_perf_results(
             bar_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=bar_ax.transAxes, fontsize=9, color="gray")
             bar_ax.set_xticks([])
         bar_ax.tick_params(axis="x", rotation=45)
-        bar_ax.set_ylabel("final score")
+        bar_ax.set_ylabel("score")
         bar_ax.set_ylim(0, perf_bar_upper)
-        bar_title = "H-Mean" if metric_name == "quality" else short_name
-        bar_ax.set_title(f"final {bar_title}", fontweight="bold")
+        bar_ax.set_title(f"final {metric_label}", fontweight="bold")
         bar_ax.grid(axis="y", alpha=0.25)
 
     fig.legend(
@@ -202,6 +246,8 @@ def plot_perf_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                marker=_method_marker(method),
+                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -245,7 +291,14 @@ def plot_time_results(
         if not any(value is not None for value in values):
             continue
         _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
-        line_ax.plot(milestone_positions, values, marker="o", markersize=4, linewidth=1.6, color=method_colors[method_name])
+        line_ax.plot(
+            milestone_positions,
+            values,
+            marker=_method_marker(method_name),
+            markersize=4.5,
+            linewidth=1.6,
+            color=method_colors[method_name],
+        )
         has_any_line = True
 
     if not has_any_line:
@@ -255,7 +308,7 @@ def plot_time_results(
     line_ax.set_xlabel("checkpoint")
     line_ax.set_ylabel("avg edit time so far (s)")
     line_ax.set_ylim(0, _zero_based_upper(value for method_name in methods_sorted for value in data[method_name]["avg_time"]))
-    line_ax.set_title("Sequential Avg Edit Time", fontweight="bold")
+    line_ax.set_title("sequential avg edit time", fontweight="bold")
     line_ax.grid(alpha=0.25)
 
     final_times = [_final_milestone_value(data[method_name]["avg_time"]) for method_name in methods_sorted]
@@ -284,7 +337,7 @@ def plot_time_results(
         bar_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=bar_ax.transAxes, fontsize=9, color="gray")
         bar_ax.set_xticks([])
     bar_ax.tick_params(axis="x", rotation=45)
-    bar_ax.set_ylabel("final avg edit time (s)")
+    bar_ax.set_ylabel("avg edit time (s)")
     bar_ax.set_title("final avg edit time", fontweight="bold")
     bar_ax.grid(axis="y", alpha=0.25)
 
@@ -296,6 +349,8 @@ def plot_time_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                marker=_method_marker(method),
+                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -342,7 +397,14 @@ def plot_composite_results(
         if not any(value is not None for value in values):
             continue
         _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
-        line_ax.plot(milestone_positions, values, marker="o", markersize=4, linewidth=1.6, color=method_colors[method_name])
+        line_ax.plot(
+            milestone_positions,
+            values,
+            marker=_method_marker(method_name),
+            markersize=4.5,
+            linewidth=1.6,
+            color=method_colors[method_name],
+        )
         has_any_line = True
 
     if not has_any_line:
@@ -351,8 +413,8 @@ def plot_composite_results(
     line_ax.set_ylim(0, _zero_based_upper(value for values in composite_series_by_method.values() for value in values))
     _set_milestone_ticks(line_ax, milestones)
     line_ax.set_xlabel("checkpoint")
-    line_ax.set_ylabel("composite score")
-    line_ax.set_title("Composite Sequential", fontweight="bold")
+    line_ax.set_ylabel("composite")
+    line_ax.set_title("sequential composite", fontweight="bold")
     line_ax.grid(alpha=0.25)
 
     values = [final_data[method_name] for method_name in methods_sorted]
@@ -381,7 +443,7 @@ def plot_composite_results(
         bar_ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=bar_ax.transAxes, fontsize=9, color="gray")
         bar_ax.set_xticks([])
     bar_ax.tick_params(axis="x", rotation=45)
-    bar_ax.set_ylabel("final composite score")
+    bar_ax.set_ylabel("composite")
     bar_ax.set_ylim(0, _zero_based_upper(bar_values))
     bar_ax.set_title("final composite", fontweight="bold")
     bar_ax.grid(axis="y", alpha=0.25)
@@ -394,6 +456,8 @@ def plot_composite_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                marker=_method_marker(method),
+                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -429,8 +493,8 @@ def plot_memory_results(
     fig, axes = plt.subplots(1, 2, figsize=figsize, squeeze=False)
 
     for ax, key, title in [
-        (axes[0][0], "peak_allocated_gb", "Peak Allocated"),
-        (axes[0][1], "peak_reserved_gb", "Peak Reserved"),
+        (axes[0][0], "peak_allocated_gb", "final peak allocated"),
+        (axes[0][1], "peak_reserved_gb", "final peak reserved"),
     ]:
         values = [data[method].get(key) for method in methods_sorted]
         stds = [data[method].get(f"{key}_std") for method in methods_sorted]
@@ -497,6 +561,8 @@ def plot_pareto_results(
 
     fig, ax = plt.subplots(figsize=figsize)
     has_points = False
+    quality_values: list[float] = []
+    quality_stds: list[float | None] = []
     for method_name in methods_sorted:
         summary = data[method_name]
         avg_time = _final_milestone_value(summary["avg_time"])
@@ -522,6 +588,7 @@ def plot_pareto_results(
             quality,
             s=point_size(memory),
             color=method_colors[method_name],
+            marker="o",
             alpha=0.78,
             edgecolor="black",
             linewidth=0.5,
@@ -529,15 +596,17 @@ def plot_pareto_results(
         )
         ax.annotate(method_name, (avg_time, quality), xytext=(5, 4), textcoords="offset points", fontsize=9)
         has_points = True
+        quality_values.append(float(quality))
+        quality_stds.append(float(quality_std) if quality_std is not None else None)
 
     if not has_points:
         ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="gray")
 
-    ax.set_xlabel("final avg edit time (s)")
-    ax.set_ylabel("final harmonic score")
-    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("avg edit time (s)")
+    ax.set_ylabel("H-mean")
+    ax.set_ylim(*_adaptive_score_ylim(quality_values, quality_stds))
     ax.set_xlim(left=0)
-    ax.set_title("final quality/time pareto", fontweight="bold")
+    ax.set_title("final H-mean/time Pareto", fontweight="bold")
     ax.grid(alpha=0.25)
     ax.legend(loc="best", title="method")
     fig.suptitle(f"pareto | point size = peak allocated memory | model={model} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
