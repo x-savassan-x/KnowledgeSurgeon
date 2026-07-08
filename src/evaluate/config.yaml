@@ -43,6 +43,7 @@ generation:
     do_sample: false
     stop_strings:
       - "\n"
+      - "\\n"
     strip_leading_newlines: true
     truncate_at_stop_strings: true
   # show_pbar: true
