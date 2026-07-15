@@ -1,0 +1,9 @@
+model_name: Qwen/Qwen3.5-9B-Base
+model_key: qwen3.5-9b
+gpu_id: 0
+fp16: true
+model_parallel: false
+device_map: auto
+
+# Keep covariance collection bounded despite Qwen3.5's long advertised context.
+layer_stats_max_length: 4096

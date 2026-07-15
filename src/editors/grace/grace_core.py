@@ -1,7 +1,6 @@
 import copy
 
 import torch
-import transformers
 
 from .utils import brackets_to_periods, parent_module
 
@@ -30,17 +29,12 @@ class GraceCore(torch.nn.Module):
         for _, p in self.model.named_parameters():
             p.requires_grad = False
 
-        if isinstance(self.model, transformers.models.gpt2.modeling_gpt2.GPT2LMHeadModel):
-            transpose = False
-        else:
-            transpose = True
-
         edit_module = parent_module(self.model, brackets_to_periods(self.layer))
         layer_name = self.layer.rsplit(".", 1)[-1]
         original_layer = getattr(edit_module, layer_name)
         self.device = original_layer.weight.device
         if type(original_layer) is not GraceAdapter:
-            setattr(edit_module, layer_name, GraceAdapter(config, original_layer, transpose=transpose).to(self.device))
+            setattr(edit_module, layer_name, GraceAdapter(config, original_layer).to(self.device))
             self.original_layer = copy.deepcopy(original_layer)
 
     def __call__(self, **kwargs):
@@ -111,7 +105,7 @@ class GraceCore(torch.nn.Module):
 
 
 class GraceAdapter(torch.nn.Module):
-    def __init__(self, config, layer, transpose):
+    def __init__(self, config, layer):
         super().__init__()
 
         self.layer = layer
@@ -126,12 +120,8 @@ class GraceAdapter(torch.nn.Module):
         self.iter = -1
         self.ensure_replace_token_loc = False
 
-        if transpose:
-            self.key_shape = layer.weight.shape[1]
-            self.value_shape = layer.weight.shape[0]
-        else:
-            self.key_shape = layer.weight.shape[0]
-            self.value_shape = layer.weight.shape[1]
+        self.key_shape = layer.weight.shape[1]
+        self.value_shape = layer.weight.shape[0]
         self.training = False
 
     def add_key(self, new_key, new_value, new_edit_id):

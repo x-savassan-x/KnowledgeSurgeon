@@ -3,7 +3,6 @@ import random
 
 import numpy as np
 import torch
-import transformers
 from torch.nn import CrossEntropyLoss, functional as F
 from torch import Tensor
 from transformers.activations import ACT2FN
@@ -82,7 +81,7 @@ class EditingMeanAct:
 
 
 class WISEAdapter(torch.nn.Module):
-    def __init__(self, config, layer, transpose):
+    def __init__(self, config, layer):
         super().__init__()
         self.layer = layer
         self.weight = self.layer.weight
@@ -92,21 +91,11 @@ class WISEAdapter(torch.nn.Module):
         self.original_layer = copy.deepcopy(self.layer)
         self.memory_weight = []
         self.memory_mean_act = []
-        if 'gpt2' in self.config.model_name:
-            self.bias = self.layer.bias
-        else:
-            self.bias = None
         self.merge_cnt = 0
         assert not self.weight.requires_grad
 
-        self.used_mask = None
-
-        if transpose:
-            self.key_shape = layer.weight.shape[1]
-            self.value_shape = layer.weight.shape[0]
-        else:
-            self.key_shape = layer.weight.shape[0]
-            self.value_shape = layer.weight.shape[1]
+        self.key_shape = layer.weight.shape[1]
+        self.value_shape = layer.weight.shape[0]
         self.training = False
         self.editing = False
 
@@ -181,12 +170,6 @@ class WISEAdapter(torch.nn.Module):
         self.weight_mask = p_mask
 
     def new_weight_forward(self, input: Tensor) -> Tensor:
-        if self.bias is not None:
-            return torch.addmm(
-                self.bias,
-                input.view(-1, input.size(-1)),
-                self.new_weight,
-            ).view(input.size()[:-1] + (self.layer.nf,))
         return F.linear(input, self.new_weight)
 
     def mask_new_weight_gradient(self):
@@ -261,8 +244,6 @@ class WISEModule(torch.nn.Module):
         for n, p in self.model.named_parameters():
             p.requires_grad = False
 
-        transpose = not isinstance(self.model, transformers.models.gpt2.modeling_gpt2.GPT2LMHeadModel)
-
         from .wise_utils import parent_module, brackets_to_periods
         self.edit_module = parent_module(self.model, brackets_to_periods(self.layer))
         self.layer_name = self.layer.rsplit(".", 1)[-1]
@@ -273,10 +254,10 @@ class WISEModule(torch.nn.Module):
                 base_layer = adapter_layer.original_layer
             else:
                 base_layer = adapter_layer
-            setattr(self.edit_module, self.layer_name, WISEAdapter(config, base_layer, transpose=transpose))
+            setattr(self.edit_module, self.layer_name, WISEAdapter(config, base_layer))
             self.original_layer = copy.deepcopy(base_layer)
         elif type(adapter_layer) is not WISEAdapter:
-            setattr(self.edit_module, self.layer_name, WISEAdapter(config, adapter_layer, transpose=transpose))
+            setattr(self.edit_module, self.layer_name, WISEAdapter(config, adapter_layer))
             self.original_layer = copy.deepcopy(adapter_layer)
 
     def __call__(self, *args, **kwargs):

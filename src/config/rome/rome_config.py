@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from ..config import Config
+from ..config import Config, resolve_project_path
 
 
 @dataclass
@@ -30,4 +30,8 @@ class RomeConfig(Config):
     mom2_dataset: str = "wikipedia"
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"
-    stats_dir: str = "./data/stats"
+    stats_dir: str = "data/assets/layer_stats"
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stats_dir = resolve_project_path(self.stats_dir)

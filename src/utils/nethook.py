@@ -3,13 +3,11 @@ Utilities for instrumenting a torch model.
 
 Trace will hook one layer at a time.
 TraceDict will hook multiple layers at once.
-subsequence slices intervals from Sequential modules.
-get_module, replace_module, get_parameter resolve dotted names.
+get_module and get_parameter resolve dotted names.
 set_requires_grad recursively sets requires_grad in module parameters.
 """
 
 import contextlib
-import copy
 import inspect
 from collections import OrderedDict
 
@@ -274,120 +272,6 @@ def recursive_copy(x, clone=None, detach=None, retain_grad=None):
         assert False, f"Unknown type {type(x)} cannot be broken into tensors."
 
 
-def subsequence(
-    sequential,
-    first_layer=None,
-    last_layer=None,
-    after_layer=None,
-    upto_layer=None,
-    single_layer=None,
-    share_weights=False,
-):
-    """
-    Creates a subsequence of a pytorch Sequential model, copying over
-    modules together with parameters for the subsequence.  Only
-    modules from first_layer to last_layer (inclusive) are included,
-    or modules between after_layer and upto_layer (exclusive).
-    Handles descent into dotted layer names as long as all references
-    are within nested Sequential models.
-
-    If share_weights is True, then references the original modules
-    and their parameters without copying them.  Otherwise, by default,
-    makes a separate brand-new copy.
-    """
-    assert (single_layer is None) or (
-        first_layer is last_layer is after_layer is upto_layer is None
-    )
-    if single_layer is not None:
-        first_layer = single_layer
-        last_layer = single_layer
-    first, last, after, upto = [
-        None if d is None else d.split(".")
-        for d in [first_layer, last_layer, after_layer, upto_layer]
-    ]
-    return hierarchical_subsequence(
-        sequential,
-        first=first,
-        last=last,
-        after=after,
-        upto=upto,
-        share_weights=share_weights,
-    )
-
-
-def hierarchical_subsequence(
-    sequential, first, last, after, upto, share_weights=False, depth=0
-):
-    """
-    Recursive helper for subsequence() to support descent into dotted
-    layer names.  In this helper, first, last, after, and upto are
-    arrays of names resulting from splitting on dots.  Can only
-    descend into nested Sequentials.
-    """
-    assert (last is None) or (upto is None)
-    assert (first is None) or (after is None)
-    if first is last is after is upto is None:
-        return sequential if share_weights else copy.deepcopy(sequential)
-    assert isinstance(sequential, torch.nn.Sequential), (
-        ".".join((first or last or after or upto)[:depth] or "arg") + " not Sequential"
-    )
-    including_children = (first is None) and (after is None)
-    included_children = OrderedDict()
-    # A = current level short name of A.
-    # AN = full name for recursive descent if not innermost.
-    (F, FN), (L, LN), (A, AN), (U, UN) = [
-        (d[depth], (None if len(d) == depth + 1 else d))
-        if d is not None
-        else (None, None)
-        for d in [first, last, after, upto]
-    ]
-    for name, layer in sequential._modules.items():
-        if name == F:
-            first = None
-            including_children = True
-        if name == A and AN is not None:  # just like F if not a leaf.
-            after = None
-            including_children = True
-        if name == U and UN is None:
-            upto = None
-            including_children = False
-        if including_children:
-            # AR = full name for recursive descent if name matches.
-            FR, LR, AR, UR = [
-                n if n is None or n[depth] == name else None for n in [FN, LN, AN, UN]
-            ]
-            chosen = hierarchical_subsequence(
-                layer,
-                first=FR,
-                last=LR,
-                after=AR,
-                upto=UR,
-                share_weights=share_weights,
-                depth=depth + 1,
-            )
-            if chosen is not None:
-                included_children[name] = chosen
-        if name == L:
-            last = None
-            including_children = False
-        if name == U and UN is not None:  # just like L if not a leaf.
-            upto = None
-            including_children = False
-        if name == A and AN is None:
-            after = None
-            including_children = True
-    for name in [first, last, after, upto]:
-        if name is not None:
-            raise ValueError("Layer %s not found" % ".".join(name))
-    # Omit empty subsequences except at the outermost level,
-    # where we should not return None.
-    if not len(included_children) and depth > 0:
-        return None
-    result = torch.nn.Sequential(included_children)
-    result.training = sequential.training
-    return result
-
-
 def set_requires_grad(requires_grad, *models):
     """
     Sets requires_grad true or false for all parameters within the
@@ -421,17 +305,6 @@ def get_parameter(model, name):
         if n == name:
             return p
     raise LookupError(name)
-
-
-def replace_module(model, name, new_module):
-    """
-    Replaces the named module within the given model.
-    """
-    if "." in name:
-        parent_name, attr_name = name.rsplit(".", 1)
-        model = get_module(model, parent_name)
-    # original_module = getattr(model, attr_name)
-    setattr(model, attr_name, new_module)
 
 
 def invoke_with_optional_args(fn, *args, **kwargs):

@@ -23,8 +23,8 @@ mom2_update_weight: 15000
 mom2_dataset: wikipedia
 mom2_n_samples: 100000
 mom2_dtype: float32
-stats_dir: data/layer_stats
+stats_dir: data/assets/layer_stats
 nullspace_threshold: 2.0e-2
 L2: 1
-P_loc: data/alpha_edit_projectors/null_space_project.pt
+P_loc: data/assets/alpha_edit_projectors/qwen2.5-7b/null_space_project.pt
 

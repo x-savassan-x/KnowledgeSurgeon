@@ -2,6 +2,8 @@
 # Change this file to keep producer, judge, and hardware settings aligned.
 
 model_name: qwen2.5-7b
+# model_name: qwen3.5-9b
+# model_name: llama3.1-8b
 
 editing_methods:
   - ft
@@ -10,7 +12,7 @@ editing_methods:
   - r_rome
   - wise
   - alpha_edit
-  - mnemo
+  # - mnemo
 
 result_names:
   - es_loc

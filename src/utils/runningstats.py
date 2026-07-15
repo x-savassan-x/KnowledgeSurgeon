@@ -6,19 +6,11 @@ To use a runningstats object,
     3. Repeat step 2 any number of times.
     4. Read out the statistic of interest, e.g., `m.mean()`
 
-Built-in runningstats objects include:
+Running-stat objects used by this project include:
 
     Mean - produces mean().
-    Variance - mean() and variance() and stdev().
-    Covariance - mean(), covariance(), correlation(), variance(), stdev().
+    NormMean - produces the average norm of input vectors.
     SecondMoment - moment() is the non-mean-centered covariance, E[x x^T].
-    Quantile - quantile(), min(), max(), median(), mean(), variance(), stdev().
-    TopK - topk() returns (values, indexes).
-    Bincount - bincount() histograms nonnegative integer data.
-    IoU - intersection(), union(), iou() tally binary co-occurrences.
-    History - history() returns concatenation of data.
-    CrossCovariance - covariance between two signals, without self-covariance.
-    CrossIoU - iou between two signals, without self-IoU.
     CombinedStat - aggregates any set of stats.
 
 Add more running stats by subclassing the Stat class.
@@ -41,7 +33,6 @@ compute the statistic, adopting the convention that cached stats are
 saved to and loaded from numpy npz files.
 """
 
-import math
 import os
 import random
 import struct
@@ -303,7 +294,6 @@ class NormMean(Mean):
         super().add(a.norm(dim=-1))
 
 
-
 class SecondMoment(Stat):
     """
     Running computation. Use this when the entire non-centered 2nd-moment
@@ -532,20 +522,6 @@ class FixedSubsetSampler(Sampler):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, key):
-        return self.samples[key]
-
-    def subset(self, new_subset):
-        return FixedSubsetSampler(self.dereference(new_subset))
-
-    def dereference(self, indices):
-        """
-        Translate output sample indices (small numbers indexing the sample)
-        to input sample indices (larger number indexing the original full set)
-        """
-        return [self.samples[i] for i in indices]
-
-
 class FixedRandomSubsetSampler(FixedSubsetSampler):
     """Samples a fixed number of samples from the dataset, deterministically.
     Arguments:
@@ -558,23 +534,7 @@ class FixedRandomSubsetSampler(FixedSubsetSampler):
         rng = random.Random(seed)
         shuffled = list(range(len(data_source)))
         rng.shuffle(shuffled)
-        self.data_source = data_source
         super(FixedRandomSubsetSampler, self).__init__(shuffled[start:end])
-
-    def class_subset(self, class_filter):
-        """
-        Returns only the subset matching the given rule.
-        """
-        if isinstance(class_filter, int):
-
-            def rule(d):
-                return d[1] == class_filter
-
-        else:
-            rule = class_filter
-        return self.subset(
-            [i for i, j in enumerate(self.samples) if rule(self.data_source[j])]
-        )
 
 
 def make_loader(
@@ -607,6 +567,3 @@ def make_loader(
     return torch.utils.data.DataLoader(
         dataset, sampler=sampler, batch_size=batch_size, **kwargs
     )
-
-
-# Unit Tests

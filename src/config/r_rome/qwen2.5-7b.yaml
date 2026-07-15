@@ -22,7 +22,7 @@ mom2_adjustment: False
 mom2_dataset: wikipedia
 mom2_n_samples: 100000
 mom2_dtype: float32
-stats_dir: ./data/stats
+stats_dir: data/assets/layer_stats
 
 enable_prompt_keys: False
 enable_random_prefix_keys: True

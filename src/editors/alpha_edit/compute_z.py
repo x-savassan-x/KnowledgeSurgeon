@@ -1,12 +1,11 @@
 from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.devices import get_model_device, get_module_device
 from ...utils import nethook
-from ..rome import repr_tools
+from ...utils import repr_tools
 
 
 def compute_z(
@@ -71,9 +70,9 @@ def compute_z(
     # Compute indices of the tokens where the fact is looked up
     lookup_idxs = [
         find_fact_lookup_idx(
-            prompt, request["subject"], tok, hparams.fact_token, verbose=(i == 0)
+            prompt, request["subject"], tok, hparams.fact_token
         )
-        for i, prompt in enumerate(all_prompts)
+        for prompt in all_prompts
     ]
 
     # Finalize rewrite and loss layers
@@ -84,12 +83,7 @@ def compute_z(
     # Set up an optimization over a latent vector that, when output at the
     # rewrite layer, i.e. hypothesized fact lookup location, will induce the
     # target token to be predicted at the final layer.
-    if hasattr(model.config, 'n_embd'):
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=delta_device)
-    elif hasattr(model.config, 'hidden_size'):
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
-    else:
-        raise NotImplementedError
+    delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
     target_init, kl_distr_init = None, None
 
     # Inserts new "delta" variable at the appropriate part of the computation
@@ -249,7 +243,6 @@ def find_fact_lookup_idx(
     subject: str,
     tok: AutoTokenizer,
     fact_token_strategy: str,
-    verbose=True,
 ) -> int:
     """
     Computes hypothesized fact lookup index given a sentence and subject.
@@ -269,12 +262,5 @@ def find_fact_lookup_idx(
         )[0][0]
     else:
         raise ValueError(f"fact_token={fact_token_strategy} not recognized")
-
-    sentence = prompt.format(subject)
-    if verbose:...
-        # print(
-        #     f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
-        #     tok.decode(tok(sentence)["input_ids"][ret]),
-        # )
 
     return ret

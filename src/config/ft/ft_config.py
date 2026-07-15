@@ -1,6 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
-
 from ..config import Config
 
 
@@ -12,15 +10,7 @@ class FtConfig(Config):
     lr: float = 5e-4
     weight_decay: float = 0
     kl_factor: float = 0
-    norm_constraint: Optional[float] = None
-    # Two implementations (objective_optimization):
-    #   1. prompt_last: the method of ROME's original paper,
-    #      which calculates NLL loss through the last token of the input.
-    #   2. target_new: the standard autoregressive method,
-    #      using the cross-entropy loss function.
-    # In survey paper (https://arxiv.org/abs/2401.01286):
-    # "prompt_last" corresponds to FT-L, and "target_new" to FT-M.
-    objective_optimization: str = "prompt_last"
+    norm_constraint: float | None = None
 
     # Defaults
     batch_size: int = 64

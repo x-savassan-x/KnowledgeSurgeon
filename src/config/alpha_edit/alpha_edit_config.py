@@ -1,15 +1,6 @@
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from ..config import Config
-
-
-def _resolve_project_path(path_value: str) -> str:
-    path = Path(path_value).expanduser()
-    if path.is_absolute():
-        return str(path)
-    project_root = Path(__file__).resolve().parents[3]
-    return str((project_root / path).resolve())
+from ..config import Config, resolve_project_path
 
 
 @dataclass
@@ -42,13 +33,13 @@ class AlphaEditConfig(Config):
     mom2_dataset: str = "wikipedia"
     mom2_n_samples: int = 100000
     mom2_dtype: str = "float32"
-    stats_dir: str = "data/layer_stats"
+    stats_dir: str = "data/assets/layer_stats"
 
     nullspace_threshold: float = 2e-2
     L2: float = 10
-    P_loc: str = "data/alpha_edit_projectors/null_space_project.pt"
+    P_loc: str = "data/assets/alpha_edit_projectors/null_space_project.pt"
 
     def __post_init__(self):
         super().__post_init__()
-        self.stats_dir = _resolve_project_path(self.stats_dir)
-        self.P_loc = _resolve_project_path(self.P_loc)
+        self.stats_dir = resolve_project_path(self.stats_dir)
+        self.P_loc = resolve_project_path(self.P_loc)

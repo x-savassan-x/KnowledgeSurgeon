@@ -1,5 +1,4 @@
 import torch
-import transformers
 
 from ...utils.generate import generate_fast
 

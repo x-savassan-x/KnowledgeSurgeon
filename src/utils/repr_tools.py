@@ -1,16 +1,14 @@
 """
-Contains utilities for extracting token representations and indices
-from string templates. Used in computing the left and right vectors for ROME.
+Utilities for extracting token representations and indices from string templates.
 """
 
-from copy import deepcopy
 from typing import List
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...utils.devices import get_model_device
-from ...utils import nethook
+from .devices import get_model_device
+from . import nethook
 
 
 def get_reprs_at_word_tokens(

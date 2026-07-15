@@ -1,0 +1,18 @@
+alg_name: GRACE
+model_config: ../base/qwen3.5-9b.yaml
+
+inner_params:
+  - model.layers[18].mlp.down_proj.weight
+
+edit_lr: 1.0
+n_iter: 50
+eps: 5.0
+dist_fn: euc
+val_init: cold
+val_train: sgd
+val_reg: None
+reg: early_stop
+replacement: replace_last
+eps_expand: coverage
+num_pert: 8
+dropout: 0.0

@@ -1,5 +1,9 @@
 model_name: Qwen/Qwen2.5-7B
+model_key: qwen2.5-7b
 gpu_id: 0
 fp16: true
 model_parallel: false
 device_map: auto
+
+# EasyEdit guards Qwen layer statistics at 4,096 tokens.
+layer_stats_max_length: 4096

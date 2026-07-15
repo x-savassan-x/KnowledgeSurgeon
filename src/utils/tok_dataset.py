@@ -79,7 +79,7 @@ def make_padded_batch(items):
             [d[k] for d in items if len(d["input_ids"])],
             batch_first=True,
         )
-        for k, v in items[0].items()
+        for k in items[0]
     }
 
 

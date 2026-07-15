@@ -1,12 +1,11 @@
 from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.devices import get_model_device, get_module_device
 from ...utils import nethook
-from . import repr_tools
+from ...utils import repr_tools
 
 
 def compute_v(
@@ -53,7 +52,7 @@ def compute_v(
     ] + [f"{request['subject']} is a"]
     lookup_idxs = [
         find_fact_lookup_idx(
-            prompt, request["subject"], tok, hparams.fact_token, verbose=(i == 0), input_prompt=vanilla_input_prompts[i]
+            prompt, request["subject"], tok, hparams.fact_token, input_prompt=vanilla_input_prompts[i]
         )
         for i, prompt in enumerate(all_prompts)
     ]
@@ -62,10 +61,7 @@ def compute_v(
     # print(f"Rewrite layer is {layer}")
     # print(f"Tying optimization objective to {loss_layer}")
 
-    if hasattr(model.config, 'n_embd'):
-        delta = torch.zeros((model.config.n_embd,), requires_grad=True, device=delta_device)
-    else:
-        delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
+    delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
     target_init, kl_distr_init = None, None
 
     def edit_output_fn(cur_out, cur_layer):
@@ -222,7 +218,6 @@ def find_fact_lookup_idx(
     subject: str,
     tok: AutoTokenizer,
     fact_token_strategy: str,
-    verbose=True,
     input_prompt=None
 ) -> int:
     ret = None
@@ -239,12 +234,5 @@ def find_fact_lookup_idx(
         )[0][0]
     else:
         raise ValueError(f"fact_token={fact_token_strategy} not recognized")
-
-    sentence = prompt.format(subject)
-    if verbose:...
-        # print(
-        #     f"Lookup index found: {ret} | Sentence: {sentence} | Token:",
-        #     tok.decode(tok(sentence)["input_ids"][ret]),
-        # )
 
     return ret

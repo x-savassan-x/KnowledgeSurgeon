@@ -1,6 +1,5 @@
 from typing import Union, List
 
-import numpy as np
 import torch
 
 class linear:

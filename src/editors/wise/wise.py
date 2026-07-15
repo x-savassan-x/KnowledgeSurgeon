@@ -93,11 +93,6 @@ class WISE(Editor):
         )
         target.editing_total_cnt = getattr(source, "editing_total_cnt", 0)
         target.merge_cnt = getattr(source, "merge_cnt", 0)
-        target.used_mask = (
-            cls._clone_tensor(source.used_mask, device)
-            if isinstance(getattr(source, "used_mask", None), torch.Tensor)
-            else copy.deepcopy(getattr(source, "used_mask", None))
-        )
 
         if hasattr(source, "weight_mask"):
             target.weight_mask = cls._clone_tensor(source.weight_mask, device)

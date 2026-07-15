@@ -1,7 +1,6 @@
-import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -10,9 +9,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from ...utils.devices import copy_to_param, get_module_device, to_param_device
 from ...utils.generate import generate_fast
 from ...utils import nethook
-from ..rome.layer_stats import layer_stats
+from ...utils.layer_stats import layer_stats
 from .compute_ks import compute_ks
-from .compute_z import compute_z, get_module_input_output_at_words, find_fact_lookup_idx
+from .compute_z import compute_z, get_module_input_output_at_words
 
 # Cache variable(s)
 CONTEXT_TEMPLATES_CACHE = None
@@ -59,18 +58,8 @@ def apply_AlphaEdit_to_model(
         # print(p_loc.resolve())
         # print(f"The null-space projection matrix P does not exist and now calculate.")
         W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
-        if (
-            "llama" in hparams.model_name.lower()
-            or "qwen" in hparams.model_name.lower()
-            or "gpt-j-6b" in hparams.model_name.lower()
-        ):
-            P = torch.zeros((len(hparams.layers), W_out.shape[1], W_out.shape[1]), device="cpu")
-        elif "gpt2-xl" in hparams.model_name.lower():
-            P = torch.zeros((len(hparams.layers), W_out.shape[0], W_out.shape[0]), device="cpu")
-        else:
-            raise ValueError(
-                f"Unsupported model for AlphaEdit projector initialization: {hparams.model_name}"
-            )
+        input_size = W_out.shape[1]
+        P = torch.zeros((len(hparams.layers), input_size, input_size), device="cpu")
         del W_out
         for i, layer in enumerate(hparams.layers):
             P[i, :, :] = get_project(model, tok, layer, hparams)
@@ -84,10 +73,8 @@ def apply_AlphaEdit_to_model(
     # Maintain the global variable cache_c to avoid redundant computations.
     if not cache_c_new:
         W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
-        if "llama" in hparams.model_name.lower() or "qwen" in hparams.model_name.lower():
-            cache_c = torch.zeros((len(hparams.layers), W_out.shape[1], W_out.shape[1]), device="cpu")
-        elif "gpt2-xl" in hparams.model_name.lower():
-            cache_c = torch.zeros((len(hparams.layers), W_out.shape[0], W_out.shape[0]), device="cpu")
+        input_size = W_out.shape[1]
+        cache_c = torch.zeros((len(hparams.layers), input_size, input_size), device="cpu")
         del W_out
         cache_c_new = True
 
@@ -180,8 +167,8 @@ def execute_AlphaEdit(
                 data = np.load(cache_fname)
                 z_list.append(torch.from_numpy(data["v_star"]).to(z_device))
                 data_loaded = True
-            except Exception as e:...
-                # print(f"Error reading cache file due to {e}. Recomputing...")
+            except Exception:
+                pass
 
         # Compute k/v pair if not loaded from cache
         if not data_loaded:
@@ -335,11 +322,7 @@ def get_cov(
 
 
 def upd_matrix_match_shape(matrix: torch.Tensor, shape: torch.Size) -> torch.Tensor:
-    """
-    GPT-2 and GPT-J have transposed weight representations.
-    Returns a matrix that matches the desired shape, else raises a ValueError
-    """
-
+    """Orient an update matrix to match the edited linear weight."""
     if matrix.shape == shape:
         return matrix
     elif matrix.T.shape == shape:

@@ -1,13 +1,11 @@
-import os
-from pathlib import Path
 from typing import Dict, List
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from ...utils import repr_tools
 from ...utils.devices import get_module_device
-from . import repr_tools
-from .layer_stats import layer_stats
+from ...utils.layer_stats import layer_stats
 
 # Cache variables
 inv_mom2_cache = {}

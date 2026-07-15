@@ -1,22 +1,3 @@
-import os
-import struct
-
-import transformers
-
-
-_UUID_VALUE: int | None = None
-
-
-def get_inner_params(named_parameters, inner_names):
-    param_dict = dict(named_parameters)
-    return [(n, param_dict[n]) for n in inner_names]
-
-
-def param_subset(named_parameters, inner_names):
-    param_dict = dict(named_parameters)
-    return [param_dict[n] for n in inner_names]
-
-
 def parent_module(model, pname):
     components = pname.split(".")
     parent = model
@@ -35,34 +16,8 @@ def parent_module(model, pname):
     return parent
 
 
-def uuid(digits=4):
-    global _UUID_VALUE
-    if _UUID_VALUE is None:
-        _UUID_VALUE = struct.unpack("I", os.urandom(4))[0] % int(10**digits)
-    return _UUID_VALUE
-
-
-def ckpt_dir():
-    path = "./ckpts/"
-    if not os.path.exists(path):
-        os.makedirs(path)
-    return path
-
-
 def brackets_to_periods(name):
     return name.replace("[", ".").replace("]", "")
-
-
-def get_params(model):
-    return model.state_dict()
-
-
-def get_shape(p, model):
-    return p.shape if isinstance(model, transformers.GPT2LMHeadModel) else (p.shape[1], p.shape[0])
-
-
-def get_logits(x):
-    return x.logits if hasattr(x, "logits") else x
 
 
 def tokenize(batch, tokenizer, device, test=False):
