@@ -12,7 +12,7 @@ editing_methods:
   - r_rome
   - wise
   - alpha_edit
-  # - mnemo
+  - mnemo
 
 result_names:
   - es_loc
