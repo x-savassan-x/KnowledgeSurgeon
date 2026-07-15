@@ -110,14 +110,6 @@ def layer_stats(
     file_extension = f"{model_key}/{ds_name}/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{size_suffix}.npz"
     filename = stats_dir / file_extension
 
-    # Reuse existing Qwen caches produced before max length entered the cache key.
-    if max_length_is_configured and npos == QWEN_DEFAULT_MAX_LENGTH and not filename.exists():
-        legacy_suffix = f"{batch_suffix}{sample_suffix}"
-        legacy_extension = f"{model_key}/{ds_name}/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{legacy_suffix}.npz"
-        legacy_filename = stats_dir / legacy_extension
-        if legacy_filename.exists() and not force_recompute:
-            filename = legacy_filename
-
     stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
     tally_kwargs = dict(
         cache=filename,
