@@ -28,8 +28,6 @@ def load_editor(config_path: str, model=None, tokenizer=None, gpu_id: int | None
     if gpu_id is not None:
         config.gpu_id = int(gpu_id)
         config.device = torch.device(f"cuda:{config.gpu_id}")
-        if config.model_parallel:
-            config.device_map = {"": config.gpu_id} if config.device_map is None else config.device_map
 
     alg_name = config.alg_name
     if alg_name not in EDITOR_REGISTRY:

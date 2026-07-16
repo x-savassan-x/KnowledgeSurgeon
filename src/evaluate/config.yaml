@@ -3,8 +3,8 @@
 
 # Project slug used for config selection and output paths.
 model_key: qwen2.5-7b
-# model_key: qwen3.5-9b
 # model_key: llama3.1-8b
+# model_key: qwen3.5-9b
 
 editing_methods:
   - ft
@@ -13,7 +13,7 @@ editing_methods:
   - r_rome
   - wise
   - alpha_edit
-  # - mnemo  # Archived placeholder; enabling it raises NotImplementedError.
+  - mnemo
 
 result_names:
   - es_loc

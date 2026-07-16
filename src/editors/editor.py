@@ -22,7 +22,7 @@ class Editor(ABC):
             "dtype": torch.bfloat16 if config.fp16 else torch.float32,
         }
         if config.model_parallel:
-            model_kwargs["device_map"] = config.device_map or "auto"
+            model_kwargs["device_map"] = "auto"
 
         self.model = AutoModelForCausalLM.from_pretrained(
             config.model_name,

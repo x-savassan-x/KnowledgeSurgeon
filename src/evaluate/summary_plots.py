@@ -1,3 +1,4 @@
+from math import cos, radians, sin, sqrt
 from pathlib import Path
 from typing import Any
 
@@ -59,8 +60,8 @@ def _edit_methods_only(methods: list[str]) -> list[str]:
     return [method_name for method_name in methods if method_name != "base"]
 
 
-def _milestone_positions(milestones: list[int]) -> list[int]:
-    return list(range(len(milestones)))
+def _milestone_positions(milestones: list[int]) -> list[float]:
+    return [sqrt(milestone) for milestone in milestones]
 
 
 def _set_milestone_ticks(ax, milestones: list[int]) -> None:
@@ -68,7 +69,9 @@ def _set_milestone_ticks(ax, milestones: list[int]) -> None:
     ax.set_xticks(positions)
     ax.set_xticklabels([str(milestone) for milestone in milestones])
     if positions:
-        ax.set_xlim(min(positions) - 0.15, max(positions) + 0.15)
+        span = max(positions) - min(positions)
+        padding = max(span * 0.03, 0.5)
+        ax.set_xlim(min(positions) - padding, max(positions) + padding)
 
 
 def _plot_std_band(
@@ -237,7 +240,7 @@ def plot_perf_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"performance | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"performance | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
@@ -249,7 +252,7 @@ def plot_time_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (12.0, 6.0),
+    figsize: tuple[float, float] = (18.0, 7.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -336,7 +339,7 @@ def plot_time_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"time | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"time | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
@@ -348,7 +351,7 @@ def plot_composite_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (12.0, 6.0),
+    figsize: tuple[float, float] = (18.0, 7.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -439,7 +442,7 @@ def plot_composite_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"composite | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"composite | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
@@ -451,7 +454,7 @@ def plot_memory_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (12.0, 5.0),
+    figsize: tuple[float, float] = (18.0, 6.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -498,7 +501,7 @@ def plot_memory_results(
         ax.set_title(title, fontweight="bold")
         ax.grid(axis="y", alpha=0.25)
 
-    fig.suptitle(f"peak edit memory | model={model_key} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"peak edit memory | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
@@ -510,7 +513,7 @@ def plot_pareto_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (8.0, 6.0),
+    figsize: tuple[float, float] = (14.0, 8.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -534,6 +537,7 @@ def plot_pareto_results(
 
     fig, ax = plt.subplots(figsize=figsize)
     has_points = False
+    label_angle = radians(50)
     quality_values: list[float] = []
     quality_stds: list[float | None] = []
     for method_name in methods_sorted:
@@ -553,21 +557,53 @@ def plot_pareto_results(
             yerr=quality_std,
             fmt="none",
             ecolor=method_colors[method_name],
-            alpha=0.45,
-            capsize=3,
+            elinewidth=2.2,
+            capsize=6,
+            capthick=2.0,
+            alpha=0.9,
+            zorder=4,
         )
+        marker_area = point_size(memory)
         ax.scatter(
             avg_time,
             quality,
-            s=point_size(memory),
+            s=marker_area,
             color=method_colors[method_name],
             marker="o",
-            alpha=0.78,
+            alpha=0.85,
             edgecolor="black",
-            linewidth=0.5,
+            linewidth=0.8,
             label=method_name,
+            zorder=3,
         )
-        ax.annotate(method_name, (avg_time, quality), xytext=(5, 4), textcoords="offset points", fontsize=9)
+        marker_radius = sqrt(marker_area) / 2
+        label_distance = marker_radius + 12
+        offset_x = label_distance * cos(label_angle)
+        offset_y = label_distance * sin(label_angle)
+        ax.annotate(
+            method_name,
+            (avg_time, quality),
+            xytext=(offset_x, offset_y),
+            textcoords="offset points",
+            ha="left",
+            va="bottom",
+            fontsize=9,
+            bbox={
+                "boxstyle": "round,pad=0.2",
+                "facecolor": "white",
+                "edgecolor": method_colors[method_name],
+                "alpha": 0.82,
+            },
+            arrowprops={
+                "arrowstyle": "-",
+                "color": method_colors[method_name],
+                "alpha": 0.75,
+                "linewidth": 1.0,
+                "shrinkA": 2,
+                "shrinkB": marker_radius + 1.5,
+            },
+            zorder=5,
+        )
         has_points = True
         quality_values.append(float(quality))
         quality_stds.append(float(quality_std) if quality_std is not None else None)
@@ -579,9 +615,13 @@ def plot_pareto_results(
     ax.set_ylabel("H-mean")
     ax.set_ylim(*_adaptive_score_ylim(quality_values, quality_stds))
     ax.set_xlim(left=0)
-    ax.set_title("final H-mean/time Pareto", fontweight="bold")
+    ax.set_title(
+        "final H-mean/time Pareto\n"
+        "point size = peak allocated memory; error bars = +/- 1 std across runs",
+        fontweight="bold",
+    )
     ax.grid(alpha=0.25)
     ax.legend(loc="best", title="method")
-    fig.suptitle(f"pareto | point size = peak allocated memory | model={model_key} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"pareto | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()

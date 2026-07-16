@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
 import torch
 
 
@@ -51,9 +49,6 @@ class Config:
 
     # When True, load large models sharded across visible GPUs via HF device_map.
     model_parallel: bool = False
-
-    # Optional explicit HF device_map. If omitted with model_parallel=True, use "auto".
-    device_map: Any | None = None
 
     # Model-specific limits for activation statistics used by ROME-family methods.
     layer_stats_max_length: int | None = None
