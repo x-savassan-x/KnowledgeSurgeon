@@ -16,18 +16,25 @@ def get_inv_cov(
     tok: AutoTokenizer,
     layer_name: str,
     mom2_dataset: str,
-    mom2_n_samples: str,
+    mom2_n_samples: int,
     mom2_dtype: str,
     hparams=None,
 ) -> torch.Tensor:
     global inv_mom2_cache
 
-    model_name = model.config._name_or_path.replace("/", "_")
-    key = (model_name, layer_name)
+    key = (
+        hparams.model_key,
+        layer_name,
+        str(hparams.stats_dir),
+        mom2_dataset,
+        int(mom2_n_samples),
+        mom2_dtype,
+        hparams.layer_stats_max_length,
+    )
 
     if key not in inv_mom2_cache:
         # print(
-        #     f"Retrieving inverse covariance statistics for {model_name} @ {layer_name}. "
+        #     f"Retrieving inverse covariance statistics for {hparams.model_key} @ {layer_name}. "
         #     f"The result will be cached to avoid repetitive computation."
         # )
         stat = layer_stats(

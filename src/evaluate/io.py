@@ -37,7 +37,7 @@ def run_setting_to_str(n_runs: int, judge_repeats: int) -> str:
 
 
 def build_method_dir(
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     n_runs: int,
@@ -45,7 +45,7 @@ def build_method_dir(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     return build_experiment_dir(
-        edited_model=edited_model,
+        model_key=model_key,
         milestones=milestones,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -54,7 +54,7 @@ def build_method_dir(
 
 
 def build_experiment_dir(
-    edited_model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -63,14 +63,14 @@ def build_experiment_dir(
     root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
     return (
         root
-        / edited_model
+        / model_key
         / milestones_to_str(milestones)
         / run_setting_to_str(n_runs, judge_repeats)
     )
 
 
 def build_hardware_path(
-    edited_model: str,
+    model_key: str,
     milestones: list[int],
     run_index: int,
     n_runs: int,
@@ -81,7 +81,7 @@ def build_hardware_path(
         raise ValueError("run_index must be > 0")
     return (
         build_experiment_dir(
-            edited_model=edited_model,
+            model_key=model_key,
             milestones=milestones,
             n_runs=n_runs,
             judge_repeats=judge_repeats,
@@ -93,7 +93,7 @@ def build_hardware_path(
 
 
 def build_result_path(
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -108,7 +108,7 @@ def build_result_path(
     if result_group not in RESULT_GROUPS:
         raise ValueError(f"result_group must be one of: {', '.join(sorted(RESULT_GROUPS))}")
     method_dir = build_method_dir(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         n_runs=n_runs,
@@ -119,7 +119,7 @@ def build_result_path(
 
 
 def build_milestone_result_path(
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -137,7 +137,7 @@ def build_milestone_result_path(
     if result_group not in {"unscored", "scored"}:
         raise ValueError("result_group must be one of: unscored, scored")
     method_dir = build_method_dir(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         n_runs=n_runs,
@@ -162,7 +162,7 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def save_benchmark_results(
     results: list[dict[str, Any]],
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -172,7 +172,7 @@ def save_benchmark_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_result_path(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -189,7 +189,7 @@ def save_benchmark_results(
 
 def save_unscored_results(
     result: dict[str, Any],
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -200,7 +200,7 @@ def save_unscored_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_milestone_result_path(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -219,7 +219,7 @@ def save_unscored_results(
 
 def save_scored_results(
     result: dict[str, Any],
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -230,7 +230,7 @@ def save_scored_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_milestone_result_path(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -249,7 +249,7 @@ def save_scored_results(
 
 def save_time_results(
     edit_times: list[float],
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -259,7 +259,7 @@ def save_time_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_result_path(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -277,7 +277,7 @@ def save_time_results(
 
 def save_memory_results(
     memory: dict[str, Any],
-    edited_model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -287,7 +287,7 @@ def save_memory_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_result_path(
-        edited_model=edited_model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -304,7 +304,7 @@ def save_memory_results(
 
 def save_hardware_results(
     hardware: dict[str, Any],
-    edited_model: str,
+    model_key: str,
     milestones: list[int],
     run_index: int,
     n_runs: int,
@@ -312,7 +312,7 @@ def save_hardware_results(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     path = build_hardware_path(
-        edited_model=edited_model,
+        model_key=model_key,
         milestones=milestones,
         run_index=run_index,
         n_runs=n_runs,
@@ -325,7 +325,7 @@ def save_hardware_results(
 
 
 def load_hardware_results(
-    edited_model: str,
+    model_key: str,
     milestones: list[int],
     run_index: int,
     n_runs: int,
@@ -333,7 +333,7 @@ def load_hardware_results(
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, Any] | None:
     path = build_hardware_path(
-        edited_model=edited_model,
+        model_key=model_key,
         milestones=milestones,
         run_index=run_index,
         n_runs=n_runs,
@@ -368,7 +368,7 @@ def load_result_file(
 
     parts = relative.parts
     if len(parts) == 5:
-        edited_model, milestones_str, run_setting, result_group, filename = parts
+        model_key, milestones_str, run_setting, result_group, filename = parts
         if result_group != "hardware" or not filename.endswith(".json"):
             return None
 
@@ -394,7 +394,7 @@ def load_result_file(
             payload = json.load(file)
 
         meta = {
-            "model": edited_model,
+            "model_key": model_key,
             "method": None,
             "milestones": milestones,
             "n_runs": n_runs,
@@ -408,7 +408,7 @@ def load_result_file(
     if len(parts) != 6:
         return None
 
-    edited_model, milestones_str, run_setting, editing_method, result_group, filename = parts
+    model_key, milestones_str, run_setting, editing_method, result_group, filename = parts
     if not filename.endswith(".json"):
         return None
     if result_group not in RESULT_GROUPS:
@@ -450,7 +450,7 @@ def load_result_file(
         payload = json.load(file)
 
     meta = {
-        "model": edited_model,
+        "model_key": model_key,
         "method": editing_method,
         "milestones": milestones,
         "n_runs": n_runs,

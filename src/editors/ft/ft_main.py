@@ -42,7 +42,7 @@ def execute_ft(
     requests: List[Dict],
     hparams,
     **kwargs: Any,
-) -> Dict[str, Tuple[torch.Tensor]]:
+) -> Dict[str, torch.Tensor]:
     """Compute a causal-LM fine-tuning update without retaining it in the model."""
     device = get_model_device(model, fallback=hparams.device)
     requests = deepcopy(requests)

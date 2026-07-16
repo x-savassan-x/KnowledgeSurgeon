@@ -197,7 +197,7 @@ def _parse_memory_payload(payload) -> dict[str, float | None]:
 
 
 def _load_run_summary(
-    model: str,
+    model_key: str,
     method: str,
     milestones: list[int],
     run_index: int,
@@ -206,7 +206,7 @@ def _load_run_summary(
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, Any] | None:
     method_dir = build_method_dir(
-        edited_model=model,
+        model_key=model_key,
         editing_method=method,
         milestones=milestones,
         n_runs=n_runs,
@@ -311,7 +311,7 @@ def _aggregate_runs(run_summaries: list[dict[str, Any]], milestones: list[int]) 
 
 
 def _load_results_with_skips(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -328,7 +328,7 @@ def _load_results_with_skips(
         missing_runs: list[int] = []
         for run_index in runs:
             summary = _load_run_summary(
-                model=model,
+                model_key=model_key,
                 method=method_name,
                 milestones=milestones,
                 run_index=run_index,
@@ -350,7 +350,7 @@ def _load_results_with_skips(
 
 
 def load_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -358,7 +358,7 @@ def load_results(
     evaluation_dir: Path | str | None = None,
 ) -> dict[str, dict[str, Any]]:
     data, _ = _load_results_with_skips(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         methods=methods,
         n_runs=n_runs,
@@ -369,7 +369,7 @@ def load_results(
 
 
 def _has_complete_method_data(
-    model: str,
+    model_key: str,
     method: str,
     milestones: list[int],
     n_runs: int,
@@ -378,7 +378,7 @@ def _has_complete_method_data(
 ) -> bool:
     return all(
         _load_run_summary(
-            model=model,
+            model_key=model_key,
             method=method,
             milestones=milestones,
             run_index=run_index,
@@ -391,7 +391,7 @@ def _has_complete_method_data(
 
 
 def _performance_methods_with_base(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -401,7 +401,7 @@ def _performance_methods_with_base(
     if "base" in methods:
         return methods
     if _has_complete_method_data(
-        model=model,
+        model_key=model_key,
         method="base",
         milestones=milestones,
         n_runs=n_runs,

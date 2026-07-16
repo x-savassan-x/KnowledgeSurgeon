@@ -22,7 +22,7 @@ def apply_rome_to_model(
     return_orig_weights=False,
     keep_original_weight=False,
     **kwargs,
-) -> Tuple[AutoModelForCausalLM, List[str]]:
+) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
     request = request[0]
     if copy:
         model = deepcopy(model)
@@ -53,7 +53,7 @@ def execute_rome(
     tok: AutoTokenizer,
     request: Dict,
     hparams,
-) -> Dict[str, Tuple[torch.Tensor]]:
+) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
     request = deepcopy(request)
     if request["target_new"] != " ":
         request["target_new"] = " " + request["target_new"]

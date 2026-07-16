@@ -207,7 +207,7 @@ def assign_judge_values(records: list[EvalRecord], lines: list[str]) -> bool:
 
 def matches_filter(
     meta: dict[str, Any],
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -218,7 +218,7 @@ def matches_filter(
 ) -> bool:
     if meta["result_group"] != result_group:
         return False
-    if meta["model"] != model:
+    if meta["model_key"] != model_key:
         return False
     if meta["milestones"] != milestones:
         return False
@@ -238,7 +238,7 @@ def scored_path_from_meta(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     return build_milestone_result_path(
-        edited_model=meta["model"],
+        model_key=meta["model_key"],
         editing_method=meta["method"],
         milestones=meta["milestones"],
         result_name=meta["result_name"],
@@ -252,7 +252,7 @@ def scored_path_from_meta(
 
 
 def find_milestone_files(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -276,7 +276,7 @@ def find_milestone_files(
         meta, _ = parsed
         if matches_filter(
             meta=meta,
-            model=model,
+            model_key=model_key,
             milestones=milestones,
             n_runs=n_runs,
             judge_repeats=judge_repeats,
@@ -291,7 +291,7 @@ def find_milestone_files(
 
 
 def find_unscored_files(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -301,7 +301,7 @@ def find_unscored_files(
     evaluation_dir: Path | str | None = None,
 ) -> list[Path]:
     return find_milestone_files(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -314,7 +314,7 @@ def find_unscored_files(
 
 
 def find_scored_files(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -324,7 +324,7 @@ def find_scored_files(
     evaluation_dir: Path | str | None = None,
 ) -> list[Path]:
     return find_milestone_files(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -350,7 +350,7 @@ def existing_scored_path_for_unscored(
 
 
 def expected_scored_paths(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -367,7 +367,7 @@ def expected_scored_paths(
 
     return [
         build_milestone_result_path(
-            edited_model=model,
+            model_key=model_key,
             editing_method=method,
             milestones=milestones,
             result_name=result_name,
@@ -390,29 +390,29 @@ def missing_paths(paths: Iterable[Path]) -> list[Path]:
 
 
 def base_scored_dir(
-    model: str,
+    model_key: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
-    return root / model / "base" / "scored" / f"j{judge_repeats}"
+    return root / model_key / "base" / "scored" / f"j{judge_repeats}"
 
 
 def base_scored_path(
-    model: str,
+    model_key: str,
     result_name: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
-    return base_scored_dir(model, judge_repeats, evaluation_dir=evaluation_dir) / f"{result_name}.json"
+    return base_scored_dir(model_key, judge_repeats, evaluation_dir=evaluation_dir) / f"{result_name}.json"
 
 
 def base_result_names(
-    model: str,
+    model_key: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> list[str]:
-    scored_dir = base_scored_dir(model, judge_repeats, evaluation_dir=evaluation_dir)
+    scored_dir = base_scored_dir(model_key, judge_repeats, evaluation_dir=evaluation_dir)
     if not scored_dir.exists():
         return []
     return sorted(path.stem for path in scored_dir.glob("*.json") if path.is_file())

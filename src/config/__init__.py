@@ -42,12 +42,17 @@ def _resolve_config_path(path: str, parent: Path) -> Path:
 def _merge_model_config(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
     model_config = config.pop("model_config", None)
     if model_config is None:
+        config.setdefault("model_key", config_path.stem)
         return config
 
     if isinstance(model_config, str):
-        base_config = _read_yaml(_resolve_config_path(model_config, config_path.parent))
+        base_config_path = _resolve_config_path(model_config, config_path.parent)
+        base_config = _read_yaml(base_config_path)
+        # The base filename is the canonical project slug used by paths and assets.
+        base_config.setdefault("model_key", base_config_path.stem)
     elif isinstance(model_config, dict):
         base_config = dict(model_config)
+        base_config.setdefault("model_key", config_path.stem)
     else:
         raise TypeError("model_config must be a path string or mapping.")
 

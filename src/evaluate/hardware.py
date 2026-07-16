@@ -245,7 +245,7 @@ def collect_hardware_info(
 
 
 def save_run_hardware(
-    edited_model: str,
+    model_key: str,
     milestones: list[int],
     run_index: int,
     n_runs: int,
@@ -261,7 +261,7 @@ def save_run_hardware(
     )
     return save_hardware_results(
         hardware=hardware,
-        edited_model=edited_model,
+        model_key=model_key,
         milestones=milestones,
         run_index=run_index,
         n_runs=n_runs,

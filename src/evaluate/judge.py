@@ -225,7 +225,7 @@ async def score_unscored_file(
 
     return save_scored_results(
         result=scored_payload,
-        edited_model=meta["model"],
+        model_key=meta["model_key"],
         editing_method=meta["method"],
         milestones=meta["milestones"],
         result_name=meta["result_name"],
@@ -238,7 +238,7 @@ async def score_unscored_file(
 
 
 def rebuild_perf_results(
-    model: str,
+    model_key: str,
     editing_method: str,
     milestones: list[int],
     result_name: str,
@@ -257,7 +257,7 @@ def rebuild_perf_results(
         meta, payload = parsed
         if not matches_filter(
             meta=meta,
-            model=model,
+            model_key=model_key,
             milestones=milestones,
             n_runs=n_runs,
             judge_repeats=judge_repeats,
@@ -277,7 +277,7 @@ def rebuild_perf_results(
     scored_records.sort(key=lambda payload: payload["step"])
     return save_benchmark_results(
         results=scored_records,
-        edited_model=model,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -301,7 +301,7 @@ def rebuild_perf_for_scored_paths(
         if meta["result_group"] != "scored":
             continue
         groups.add((
-            meta["model"],
+            meta["model_key"],
             meta["method"],
             tuple(meta["milestones"]),
             meta["result_name"],
@@ -311,9 +311,9 @@ def rebuild_perf_for_scored_paths(
         ))
 
     perf_paths: list[Path] = []
-    for model, method, milestones, result_name, run_index, n_runs, judge_repeats in sorted(groups):
+    for model_key, method, milestones, result_name, run_index, n_runs, judge_repeats in sorted(groups):
         path = rebuild_perf_results(
-            model=model,
+            model_key=model_key,
             editing_method=method,
             milestones=list(milestones),
             result_name=result_name,
@@ -328,7 +328,7 @@ def rebuild_perf_for_scored_paths(
 
 
 def materialize_base_perf_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -343,7 +343,7 @@ def materialize_base_perf_results(
     milestones = normalize_milestones(milestones)
     runs = list(run_indices) if run_indices is not None else list(range(1, n_runs + 1))
     names = list(result_names) if result_names is not None else base_result_names(
-        model=model,
+        model_key=model_key,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
     )
@@ -351,7 +351,7 @@ def materialize_base_perf_results(
     if not names:
         log_status(
             "[base-skip] "
-            f"model={model} "
+            f"model={model_key} "
             f"judge_repeats={judge_repeats} "
             "reason=no_result_names_or_scored_files",
             log_path,
@@ -362,7 +362,7 @@ def materialize_base_perf_results(
     perf_paths: list[Path] = []
     for result_name in names:
         scored_path = base_scored_path(
-            model=model,
+            model_key=model_key,
             result_name=result_name,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
@@ -370,7 +370,7 @@ def materialize_base_perf_results(
         if not scored_path.exists():
             log_status(
                 "[base-skip] "
-                f"model={model} "
+                f"model={model_key} "
                 f"result={result_name} "
                 f"judge_repeats={judge_repeats} "
                 f"path={scored_path} "
@@ -386,7 +386,7 @@ def materialize_base_perf_results(
         if payload.get("base_limit") is not None:
             log_status(
                 "[base-skip] "
-                f"model={model} "
+                f"model={model_key} "
                 f"result={result_name} "
                 f"path={scored_path} "
                 "reason=limited_baseline_not_reusable",
@@ -403,7 +403,7 @@ def materialize_base_perf_results(
         if milestones[-1] > dataset_rows:
             log_status(
                 "[base-skip] "
-                f"model={model} "
+                f"model={model_key} "
                 f"result={result_name} "
                 f"dataset_rows={dataset_rows} "
                 f"required_rows={milestones[-1]} "
@@ -422,7 +422,7 @@ def materialize_base_perf_results(
 
         for run_index in runs:
             perf_path = build_result_path(
-                edited_model=model,
+                model_key=model_key,
                 editing_method="base",
                 milestones=milestones,
                 result_name=result_name,
@@ -436,7 +436,7 @@ def materialize_base_perf_results(
                 perf_paths.append(perf_path)
                 log_status(
                     "[base-perf-exists] "
-                    f"model={model} "
+                    f"model={model_key} "
                     f"result={result_name} "
                     f"run={run_index}/{n_runs} "
                     f"path={perf_path}",
@@ -466,7 +466,7 @@ def materialize_base_perf_results(
 
             perf_path = save_benchmark_results(
                 results=records,
-                edited_model=model,
+                model_key=model_key,
                 editing_method="base",
                 milestones=milestones,
                 result_name=result_name,
@@ -478,7 +478,7 @@ def materialize_base_perf_results(
             perf_paths.append(perf_path)
             log_status(
                 "[base-perf-rebuilt] "
-                f"model={model} "
+                f"model={model_key} "
                 f"result={result_name} "
                 f"run={run_index}/{n_runs} "
                 f"path={perf_path}",
@@ -490,7 +490,7 @@ def materialize_base_perf_results(
 
 
 def rebuild_perf_from_scored(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -502,7 +502,7 @@ def rebuild_perf_from_scored(
     verbose: bool = False,
 ) -> list[Path]:
     scored_paths = find_scored_files(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -514,7 +514,7 @@ def rebuild_perf_from_scored(
     if not scored_paths:
         log_status(
             "[perf-rebuild-skip] "
-            f"model={model} "
+            f"model={model_key} "
             f"milestones={normalize_milestones(milestones)} "
             f"n_runs={n_runs} "
             f"judge_repeats={judge_repeats} "
@@ -538,7 +538,7 @@ def rebuild_perf_from_scored(
 
 
 async def score_pending_unscored(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -570,7 +570,7 @@ async def score_pending_unscored(
     log_path = judge_config.get("worker_log_path", judge_config.get("log_path"))
     worker_verbose = bool(judge_config.get("verbose", False) if verbose is None else verbose)
     expected_paths = expected_scored_paths(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -582,7 +582,7 @@ async def score_pending_unscored(
 
     log_status(
         "[worker-start] "
-        f"model={model} "
+        f"model={model_key} "
         f"milestones={normalize_milestones(milestones)} "
         f"n_runs={n_runs} "
         f"judge_repeats={judge_repeats} "
@@ -597,7 +597,7 @@ async def score_pending_unscored(
     def _find_pending_paths() -> list[Path]:
         active_paths = {path.resolve() for path in active_tasks.values()}
         unscored_paths = find_unscored_files(
-            model=model,
+            model_key=model_key,
             milestones=milestones,
             n_runs=n_runs,
             judge_repeats=judge_repeats,

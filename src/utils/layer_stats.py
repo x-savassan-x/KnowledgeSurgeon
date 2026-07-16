@@ -66,20 +66,16 @@ def layer_stats(
     stats_dir,
     ds_name,
     to_collect,
-    model_name=None,
     sample_size=None,
     precision=None,
-    batch_tokens=None,
     progress=None,
     force_recompute=False,
     hparams=None,
 ):
+    if hparams is None:
+        raise ValueError("hparams is required to resolve model-specific layer statistics.")
     npos, max_length_is_configured = _configured_max_length(model, hparams)
-    if batch_tokens is None:
-        batch_tokens = npos * 3
-    batch_tokens = int(batch_tokens)
-    if batch_tokens <= 0:
-        raise ValueError("batch_tokens must be positive.")
+    batch_tokens = npos * 3
 
     def get_ds():
         ds_config_map = {
@@ -89,8 +85,7 @@ def layer_stats(
         }
         hf_path, hf_config = ds_config_map[ds_name]
         raw_ds = load_dataset(hf_path, hf_config)
-        maxlen = min(npos, batch_tokens)
-        return TokenizedDataset(raw_ds["train"], tokenizer, maxlen=maxlen)
+        return TokenizedDataset(raw_ds["train"], tokenizer, maxlen=npos)
 
     batch_size = 100
     if precision is None:
@@ -98,13 +93,8 @@ def layer_stats(
     dtype = getattr(torch, precision)
     sample_suffix = "" if sample_size is None else f"_{sample_size}"
     length_suffix = f"_l{npos}" if max_length_is_configured else ""
-    batch_suffix = f"_t{batch_tokens}" if batch_tokens < npos else ""
-    size_suffix = f"{length_suffix}{batch_suffix}{sample_suffix}"
-    model_key = getattr(hparams, "model_key", None)
-    if model_key is None:
-        model_key = model_name
-    if model_key is None:
-        model_key = model.config._name_or_path.rsplit("/")[-1]
+    size_suffix = f"{length_suffix}{sample_suffix}"
+    model_key = hparams.model_key
 
     stats_dir = Path(stats_dir)
     file_extension = f"{model_key}/{ds_name}/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{size_suffix}.npz"

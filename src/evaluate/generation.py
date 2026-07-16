@@ -188,7 +188,7 @@ def generate_and_save_unscored(
     step: int,
     max_step: int,
     run_index: int,
-    model_name: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -235,7 +235,7 @@ def generate_and_save_unscored(
     }
     unscored_path = save_unscored_results(
         result=unscored_payload,
-        edited_model=model_name,
+        model_key=model_key,
         editing_method=editing_method,
         milestones=milestones,
         result_name=result_name,
@@ -267,7 +267,7 @@ class AsyncGenerationManager:
         max_step: int,
         config_path: Path,
         generation_device_indices: list[int],
-        model_name: str,
+        model_key: str,
         milestones: list[int],
         n_runs: int,
         judge_repeats: int,
@@ -281,7 +281,7 @@ class AsyncGenerationManager:
         self.result_name = result_name
         self.run_index = run_index
         self.max_step = max_step
-        self.model_name = model_name
+        self.model_key = model_key
         self.milestones = milestones
         self.n_runs = n_runs
         self.judge_repeats = judge_repeats
@@ -478,7 +478,7 @@ class AsyncGenerationManager:
                 step=step,
                 max_step=self.max_step,
                 run_index=self.run_index,
-                model_name=self.model_name,
+                model_key=self.model_key,
                 milestones=self.milestones,
                 n_runs=self.n_runs,
                 judge_repeats=self.judge_repeats,

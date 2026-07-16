@@ -33,7 +33,7 @@ def _centered_style(df: pd.DataFrame, hide_index: bool = False):
 
 
 def table_perf_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -42,7 +42,7 @@ def table_perf_results(
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         methods=methods,
         n_runs=n_runs,
@@ -50,7 +50,7 @@ def table_perf_results(
         evaluation_dir=evaluation_dir,
     )
     data, skipped = _load_results_with_skips(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         methods=perf_methods,
         n_runs=n_runs,
@@ -83,12 +83,12 @@ def table_perf_results(
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
-    print(f"performance | H=harmonic mean(ES, Loc, Port) | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"performance | H=harmonic mean(ES, Loc, Port) | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
 
 
 def table_time_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -97,7 +97,7 @@ def table_time_results(
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -114,12 +114,12 @@ def table_time_results(
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
-    print(f"avg edit time | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"avg edit time | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
 
 
 def table_composite_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -128,7 +128,7 @@ def table_composite_results(
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -146,12 +146,12 @@ def table_composite_results(
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
     df.index.name = "method"
-    print(f"composite | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"composite | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
 
 
 def table_memory_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -160,7 +160,7 @@ def table_memory_results(
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -190,7 +190,7 @@ def table_memory_results(
         columns=["peak allocated", "peak reserved"],
     )
     df.index.name = "method"
-    print(f"peak edit memory | model={model} | r{n_runs}-j{judge_repeats}")
+    print(f"peak edit memory | model={model_key} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
 
 
@@ -323,7 +323,7 @@ def _hardware_python_label(payload: dict[str, Any] | None) -> str:
 
 
 def table_hardware_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     n_runs: int,
     judge_repeats: int,
@@ -333,7 +333,7 @@ def table_hardware_results(
     rows: list[dict[str, Any]] = []
     for run_index in _runs_from_count(n_runs):
         payload = load_hardware_results(
-            edited_model=model,
+            model_key=model_key,
             milestones=milestones,
             run_index=run_index,
             n_runs=n_runs,
@@ -393,12 +393,12 @@ def table_hardware_results(
         })
 
     df = pd.DataFrame(rows)
-    print(f"hardware | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"hardware | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df, hide_index=True)
 
 
 def audit_result_grid(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -423,7 +423,7 @@ def audit_result_grid(
                     if result_group in {"unscored", "scored"}:
                         expected_paths.extend(
                             build_milestone_result_path(
-                                edited_model=model,
+                                model_key=model_key,
                                 editing_method=method_name,
                                 milestones=milestones,
                                 result_name=result_name,
@@ -439,7 +439,7 @@ def audit_result_grid(
                     else:
                         expected_paths.append(
                             build_result_path(
-                                edited_model=model,
+                                model_key=model_key,
                                 editing_method=method_name,
                                 milestones=milestones,
                                 result_name=result_name,
@@ -470,7 +470,7 @@ def audit_result_grid(
             })
 
     df = pd.DataFrame(rows)
-    print(f"result-grid audit | model={model} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(f"result-grid audit | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
 
     if only_problems:
         problem_df = df[df["missing"] > 0].reset_index(drop=True)

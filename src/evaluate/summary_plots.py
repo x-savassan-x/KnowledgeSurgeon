@@ -25,25 +25,14 @@ from .summary_utils import (
 
 
 METHOD_COLOR_PALETTE = {
-    "base": "#5F5F5F",
-    "ft": "#1F77B4",
-    "rome": "#FF7F0E",
-    "grace": "#2CA02C",
-    "r_rome": "#D62728",
-    "wise": "#17BECF",
-    "alpha_edit": "#9467BD",
-    "mnemo": "#8C564B",
-}
-
-METHOD_MARKERS = {
-    "base": "o",
-    "ft": "s",
-    "rome": "^",
-    "grace": "D",
-    "r_rome": "v",
-    "wise": "P",
-    "alpha_edit": "X",
-    "mnemo": "*",
+    "base": "#4D4D4D",
+    "ft": "#0072B2",
+    "rome": "#E69F00",
+    "grace": "#009E73",
+    "r_rome": "#D55E00",
+    "wise": "#56B4E9",
+    "alpha_edit": "#CC79A7",
+    "mnemo": "#8C6D31",
 }
 
 
@@ -60,10 +49,6 @@ def _method_colors(methods_sorted: list[str]) -> dict[str, Any]:
     for index, method_name in enumerate(extra_methods):
         palette[method_name] = cmap(index % max(1, len(cmap.colors)))
     return {method_name: palette[method_name] for method_name in methods_sorted}
-
-
-def _method_marker(method_name: str) -> str:
-    return METHOD_MARKERS.get(method_name, "o")
 
 
 def _metric_label(short_name: str, metric_name: str) -> str:
@@ -140,7 +125,7 @@ def _adaptive_score_ylim(
 
 
 def plot_perf_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -150,14 +135,14 @@ def plot_perf_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
-        model=model,
+        model_key=model_key,
         milestones=milestones,
         methods=methods,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
     )
-    data, skipped = _load_results_with_skips(model, milestones, perf_methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, perf_methods, n_runs, judge_repeats, evaluation_dir)
     final_data = _load_performance_finals(data)
     _print_skipped(skipped)
     if not data or not final_data:
@@ -193,8 +178,6 @@ def plot_perf_results(
             line_ax.plot(
                 milestone_positions,
                 values,
-                marker=_method_marker(method_name),
-                markersize=4.5,
                 color=method_colors[method_name],
                 **_line_style_for_method(method_name),
             )
@@ -246,8 +229,6 @@ def plot_perf_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
-                marker=_method_marker(method),
-                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -256,13 +237,13 @@ def plot_perf_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"performance | model={model} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"performance | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def plot_time_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -272,7 +253,7 @@ def plot_time_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -294,8 +275,6 @@ def plot_time_results(
         line_ax.plot(
             milestone_positions,
             values,
-            marker=_method_marker(method_name),
-            markersize=4.5,
             linewidth=1.6,
             color=method_colors[method_name],
         )
@@ -349,8 +328,6 @@ def plot_time_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
-                marker=_method_marker(method),
-                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -359,13 +336,13 @@ def plot_time_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"time | model={model} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"time | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def plot_composite_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -375,7 +352,7 @@ def plot_composite_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     final_data = _load_composite_finals(data)
     _print_skipped(skipped)
     if not data or not final_data:
@@ -400,8 +377,6 @@ def plot_composite_results(
         line_ax.plot(
             milestone_positions,
             values,
-            marker=_method_marker(method_name),
-            markersize=4.5,
             linewidth=1.6,
             color=method_colors[method_name],
         )
@@ -456,8 +431,6 @@ def plot_composite_results(
                 color=method_colors[method],
                 lw=_line_style_for_method(method).get("linewidth", 2),
                 linestyle=_line_style_for_method(method).get("linestyle", "-"),
-                marker=_method_marker(method),
-                markersize=5,
                 label=method,
             )
             for method in methods_sorted
@@ -466,13 +439,13 @@ def plot_composite_results(
         bbox_to_anchor=(1.01, 0.5),
         title="method",
     )
-    fig.suptitle(f"composite | model={model} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"composite | model={model_key} milestones={milestones} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def plot_memory_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -482,7 +455,7 @@ def plot_memory_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -525,13 +498,13 @@ def plot_memory_results(
         ax.set_title(title, fontweight="bold")
         ax.grid(axis="y", alpha=0.25)
 
-    fig.suptitle(f"peak edit memory | model={model} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"peak edit memory | model={model_key} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
 
 def plot_pareto_results(
-    model: str,
+    model_key: str,
     milestones: list[int],
     methods: list[str],
     n_runs: int,
@@ -541,7 +514,7 @@ def plot_pareto_results(
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -609,6 +582,6 @@ def plot_pareto_results(
     ax.set_title("final H-mean/time Pareto", fontweight="bold")
     ax.grid(alpha=0.25)
     ax.legend(loc="best", title="method")
-    fig.suptitle(f"pareto | point size = peak allocated memory | model={model} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.suptitle(f"pareto | point size = peak allocated memory | model={model_key} r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()

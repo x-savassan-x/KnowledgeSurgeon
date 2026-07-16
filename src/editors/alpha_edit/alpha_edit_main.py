@@ -17,8 +17,10 @@ from .compute_z import compute_z, get_module_input_output_at_words
 CONTEXT_TEMPLATES_CACHE = None
 COV_CACHE = {}
 
-P_loaded = False
+P = None
+P_loaded_path: Path | None = None
 cache_c_new = False
+cache_c_key = None
 
 
 def apply_AlphaEdit_to_model(
@@ -32,7 +34,7 @@ def apply_AlphaEdit_to_model(
     keep_original_weight=False,
     reset_cache=False,
     **kwargs
-) -> Dict[str, Tuple[torch.Tensor]]:
+) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
     """
     Returns a model with the desired changes.
     :param copy: If true, will preserve the original model while creating a new one to edit.
@@ -41,7 +43,7 @@ def apply_AlphaEdit_to_model(
     :return: (1) the updated model, (2) an original copy of the weights that changed
     """
 
-    global P, P_loaded, cache_c, cache_c_new
+    global P, P_loaded_path, cache_c, cache_c_new, cache_c_key
 
     # Reset cache if requested
     if reset_cache:
@@ -51,32 +53,30 @@ def apply_AlphaEdit_to_model(
     if copy:
         model = deepcopy(model)
 
-    # Calculate the null-space projection matrix P
     p_loc = Path(hparams.P_loc)
-
     if not p_loc.exists():
-        # print(p_loc.resolve())
-        # print(f"The null-space projection matrix P does not exist and now calculate.")
-        W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
-        input_size = W_out.shape[1]
-        P = torch.zeros((len(hparams.layers), input_size, input_size), device="cpu")
-        del W_out
-        for i, layer in enumerate(hparams.layers):
-            P[i, :, :] = get_project(model, tok, layer, hparams)
-        p_loc.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(P, p_loc)
-        P_loaded = True
-    elif P_loaded == False:
-        P = torch.load(p_loc)
-        P_loaded = True
+        raise FileNotFoundError(
+            f"AlphaEdit projector is missing: {p_loc}. "
+            "Download it with notebook/assets.ipynb before editing."
+        )
 
-    # Maintain the global variable cache_c to avoid redundant computations.
-    if not cache_c_new:
+    resolved_p_loc = p_loc.resolve()
+    if P_loaded_path != resolved_p_loc:
+        P = torch.load(p_loc, map_location="cpu")
+        P_loaded_path = resolved_p_loc
+
+    current_cache_key = (
+        hparams.model_key,
+        tuple(hparams.layers),
+        hparams.rewrite_module_tmp,
+    )
+    if not cache_c_new or cache_c_key != current_cache_key:
         W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
         input_size = W_out.shape[1]
         cache_c = torch.zeros((len(hparams.layers), input_size, input_size), device="cpu")
         del W_out
         cache_c_new = True
+        cache_c_key = current_cache_key
 
     deltas = execute_AlphaEdit(model, tok, requests, hparams, cache_template=cache_template)
 
@@ -101,7 +101,7 @@ def execute_AlphaEdit(
     requests: List[Dict],
     hparams,
     cache_template: Optional[str] = None,
-) -> Dict[str, Tuple[torch.Tensor]]:
+) -> Dict[str, torch.Tensor]:
     """
     Executes the AlphaEdit update algorithm for the specified update at the specified layer
     Invariant: model at beginning of function == model at end of function
@@ -282,7 +282,7 @@ def get_cov(
     tok: AutoTokenizer,
     layer_name: str,
     mom2_dataset: str,
-    mom2_n_samples: str,
+    mom2_n_samples: int,
     mom2_dtype: str,
     inv: bool = False,
     force_recompute: bool = False,
@@ -294,10 +294,17 @@ def get_cov(
     Caches result for future use.
     """
 
-    model_name = model.config._name_or_path.replace("/", "_")
-    key = (model_name, layer_name)
+    key = (
+        hparams.model_key,
+        layer_name,
+        str(hparams.stats_dir),
+        mom2_dataset,
+        int(mom2_n_samples),
+        mom2_dtype,
+        hparams.layer_stats_max_length,
+    )
 
-    # print(f"Retrieving covariance statistics for {model_name} @ {layer_name}.")
+    # print(f"Retrieving covariance statistics for {hparams.model_key} @ {layer_name}.")
     if key not in COV_CACHE or force_recompute:
         stat = layer_stats(
             model,

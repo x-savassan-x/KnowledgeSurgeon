@@ -22,7 +22,7 @@ def apply_r_rome_to_model(
     return_orig_weights=False,
     keep_original_weight=False,
     **kwargs,
-) -> Tuple[AutoModelForCausalLM, List[str]]:
+) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
     if not hparams.original_implementation and (
         hparams.enable_prompt_keys == hparams.enable_random_prefix_keys
     ):
@@ -61,7 +61,7 @@ def execute_r_rome(
     tok: AutoTokenizer,
     request: Dict,
     hparams,
-) -> Dict[str, Tuple[torch.Tensor]]:
+) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
     request = deepcopy(request)
     if request["target_new"] != " ":
         request["target_new"] = " " + request["target_new"]
