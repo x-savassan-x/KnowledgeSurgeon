@@ -9,6 +9,8 @@ numpy
 
 # AI
 transformers
+sentence-transformers
+FlagEmbedding
 torch
 openai
 safetensors
