@@ -166,31 +166,48 @@ def table_memory_results(
         print("No result files found for the selected settings.")
         return pd.DataFrame()
 
+    metrics = [
+        ("allocated", "allocated_gb"),
+        ("reserved", "reserved_gb"),
+    ]
+    columns = pd.MultiIndex.from_tuples([
+        (f"step {step}", metric_label)
+        for step in milestones
+        for metric_label, _ in metrics
+    ] + [
+        ("overall peak", metric_label)
+        for metric_label, _ in metrics
+    ])
+
     table_data: dict[str, list[str]] = {}
     for method_name in _ordered_method_names(data, methods):
         summary = data[method_name]
-        table_data[method_name] = [
-            _format_mean_std(
-                summary.get("peak_allocated_gb"),
-                summary.get("peak_allocated_gb_std"),
+        row: list[str] = []
+        for step_index, _ in enumerate(milestones):
+            for _, metric_name in metrics:
+                row.append(_format_mean_std(
+                    summary[metric_name][step_index],
+                    summary.get(f"{metric_name}_std", [None] * len(milestones))[step_index],
+                    decimals=2,
+                    suffix=" GB",
+                ))
+        for _, metric_name in metrics:
+            peak_name = f"peak_{metric_name}"
+            row.append(_format_mean_std(
+                summary.get(peak_name),
+                summary.get(f"{peak_name}_std"),
                 decimals=2,
                 suffix=" GB",
-            ),
-            _format_mean_std(
-                summary.get("peak_reserved_gb"),
-                summary.get("peak_reserved_gb_std"),
-                decimals=2,
-                suffix=" GB",
-            ),
-        ]
+            ))
+        table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(
         table_data,
         orient="index",
-        columns=["peak allocated", "peak reserved"],
+        columns=columns,
     )
     df.index.name = "method"
-    print(f"peak edit memory | model={model_key} | r{n_runs}-j{judge_repeats}")
+    print(f"edit memory | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df)
 
 

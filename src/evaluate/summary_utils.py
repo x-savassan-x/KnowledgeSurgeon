@@ -168,13 +168,27 @@ def _parse_time_payload(payload, milestones: list[int]) -> dict[str, list[float 
     return {"avg_time": _avg_time_series_from_edit_times(edit_times, milestones)}
 
 
-def _parse_memory_payload(payload) -> dict[str, float | None]:
+def _parse_memory_payload(
+    payload,
+    milestones: list[int],
+) -> dict[str, Any]:
+    empty_series = [None] * len(milestones)
     if payload is None:
-        return {"peak_allocated_gb": None, "peak_reserved_gb": None}
+        return {
+            "allocated_gb": empty_series.copy(),
+            "reserved_gb": empty_series.copy(),
+            "peak_allocated_gb": None,
+            "peak_reserved_gb": None,
+        }
 
     edit_payload = payload.get("edit", payload) if isinstance(payload, dict) else {}
     if not isinstance(edit_payload, dict):
-        return {"peak_allocated_gb": None, "peak_reserved_gb": None}
+        return {
+            "allocated_gb": empty_series.copy(),
+            "reserved_gb": empty_series.copy(),
+            "peak_allocated_gb": None,
+            "peak_reserved_gb": None,
+        }
 
     allocated = edit_payload.get("total_peak_allocated_gb")
     reserved = edit_payload.get("total_peak_reserved_gb")
@@ -194,7 +208,40 @@ def _parse_memory_payload(payload) -> dict[str, float | None]:
             allocated = sum(allocated_values) if allocated_values else allocated
             reserved = sum(reserved_values) if reserved_values else reserved
 
+    allocated_by_step = {step: None for step in milestones}
+    reserved_by_step = {step: None for step in milestones}
+    for milestone in edit_payload.get("milestones", []):
+        if not isinstance(milestone, dict):
+            continue
+        step = milestone.get("step")
+        if step not in allocated_by_step:
+            continue
+
+        milestone_allocated = milestone.get("total_allocated_gb")
+        milestone_reserved = milestone.get("total_reserved_gb")
+        devices = milestone.get("devices", [])
+        if isinstance(devices, list):
+            allocated_values = [
+                float(device["allocated_gb"])
+                for device in devices
+                if isinstance(device, dict) and device.get("allocated_gb") is not None
+            ]
+            reserved_values = [
+                float(device["reserved_gb"])
+                for device in devices
+                if isinstance(device, dict) and device.get("reserved_gb") is not None
+            ]
+            if milestone_allocated is None and allocated_values:
+                milestone_allocated = sum(allocated_values)
+            if milestone_reserved is None and reserved_values:
+                milestone_reserved = sum(reserved_values)
+
+        allocated_by_step[step] = float(milestone_allocated) if milestone_allocated is not None else None
+        reserved_by_step[step] = float(milestone_reserved) if milestone_reserved is not None else None
+
     return {
+        "allocated_gb": [allocated_by_step[step] for step in milestones],
+        "reserved_gb": [reserved_by_step[step] for step in milestones],
         "peak_allocated_gb": float(allocated) if allocated is not None else None,
         "peak_reserved_gb": float(reserved) if reserved is not None else None,
     }
@@ -242,9 +289,23 @@ def _load_run_summary(
         avg_time = [None] * len(milestones)
 
     memory_summaries = [
-        _parse_memory_payload(payload)
+        _parse_memory_payload(payload, milestones)
         for payload in (es_loc_memory, port_memory)
         if payload is not None
+    ]
+    allocated_gb = [
+        max(
+            (summary["allocated_gb"][idx] for summary in memory_summaries if summary["allocated_gb"][idx] is not None),
+            default=None,
+        )
+        for idx in range(len(milestones))
+    ]
+    reserved_gb = [
+        max(
+            (summary["reserved_gb"][idx] for summary in memory_summaries if summary["reserved_gb"][idx] is not None),
+            default=None,
+        )
+        for idx in range(len(milestones))
     ]
     peak_allocated_gb = (
         max(
@@ -268,13 +329,15 @@ def _load_run_summary(
         "locality": _extract_score_series(es_loc_records or [], "locality", milestones),
         "portability": _extract_score_series(port_records or [], "portability", milestones),
         "avg_time": avg_time,
+        "allocated_gb": allocated_gb,
+        "reserved_gb": reserved_gb,
         "peak_allocated_gb": peak_allocated_gb,
         "peak_reserved_gb": peak_reserved_gb,
     }
 
 
 def _aggregate_runs(run_summaries: list[dict[str, Any]], milestones: list[int]) -> dict[str, Any]:
-    keys = ("success", "locality", "portability", "avg_time")
+    keys = ("success", "locality", "portability", "avg_time", "allocated_gb", "reserved_gb")
     aggregate: dict[str, Any] = {"runs": run_summaries}
     for key in keys:
         aggregate[key] = [

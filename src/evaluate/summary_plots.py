@@ -454,7 +454,7 @@ def plot_memory_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
-    figsize: tuple[float, float] = (18.0, 6.0),
+    figsize: tuple[float, float] = (18.0, 11.0),
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -466,25 +466,75 @@ def plot_memory_results(
 
     methods_sorted = _ordered_method_names(data, methods)
     method_colors = _method_colors(methods_sorted)
-    fig, axes = plt.subplots(1, 2, figsize=figsize, squeeze=False)
+    milestone_positions = _milestone_positions(milestones)
+    fig, axes = plt.subplots(2, 2, figsize=figsize, squeeze=False)
 
-    for ax, key, title in [
-        (axes[0][0], "peak_allocated_gb", "final peak allocated"),
-        (axes[0][1], "peak_reserved_gb", "final peak reserved"),
-    ]:
-        values = [data[method].get(key) for method in methods_sorted]
-        stds = [data[method].get(f"{key}_std") for method in methods_sorted]
-        bar_methods = [method for method, value in zip(methods_sorted, values) if value is not None]
-        bar_values = [value for value in values if value is not None]
+    for row_index, (key, peak_key, label) in enumerate([
+        ("allocated_gb", "peak_allocated_gb", "allocated"),
+        ("reserved_gb", "peak_reserved_gb", "reserved"),
+    ]):
+        line_ax, bar_ax = axes[row_index]
+        has_any_line = False
+        for method_name in methods_sorted:
+            values = data[method_name][key]
+            stds = data[method_name].get(f"{key}_std", [None] * len(milestones))
+            if not any(value is not None for value in values):
+                continue
+            _plot_std_band(
+                line_ax,
+                milestone_positions,
+                values,
+                stds,
+                method_colors[method_name],
+                lower_bound=0.0,
+            )
+            line_ax.plot(
+                milestone_positions,
+                values,
+                color=method_colors[method_name],
+                **_line_style_for_method(method_name),
+            )
+            has_any_line = True
+
+        if not has_any_line:
+            line_ax.text(
+                0.5,
+                0.5,
+                "no milestone data",
+                ha="center",
+                va="center",
+                transform=line_ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
+
+        _set_milestone_ticks(line_ax, milestones)
+        line_ax.set_xlabel("checkpoint")
+        line_ax.set_ylabel("GB")
+        line_ax.set_ylim(0, _zero_based_upper(
+            [
+                value
+                for method_name in methods_sorted
+                for value in data[method_name][key]
+            ],
+            min_upper=1.0,
+        ))
+        line_ax.set_title(f"{label} memory at milestones", fontweight="bold")
+        line_ax.grid(alpha=0.25)
+
+        peak_values = [data[method_name].get(peak_key) for method_name in methods_sorted]
+        peak_stds = [data[method_name].get(f"{peak_key}_std") for method_name in methods_sorted]
+        bar_methods = [method for method, value in zip(methods_sorted, peak_values) if value is not None]
+        bar_values = [value for value in peak_values if value is not None]
         bar_stds = [
             std
-            for value, std in zip(values, stds)
+            for value, std in zip(peak_values, peak_stds)
             if value is not None and std is not None
         ]
         yerr = bar_stds if len(bar_stds) == len(bar_values) else None
 
         if bar_values:
-            ax.bar(
+            bar_ax.bar(
                 bar_methods,
                 bar_values,
                 yerr=yerr,
@@ -493,15 +543,40 @@ def plot_memory_results(
                 width=0.7,
             )
         else:
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="gray")
-            ax.set_xticks([])
-        ax.tick_params(axis="x", rotation=45)
-        ax.set_ylabel("GB")
-        ax.set_ylim(0, _zero_based_upper(bar_values, min_upper=1.0))
-        ax.set_title(title, fontweight="bold")
-        ax.grid(axis="y", alpha=0.25)
+            bar_ax.text(
+                0.5,
+                0.5,
+                "no overall peak data",
+                ha="center",
+                va="center",
+                transform=bar_ax.transAxes,
+                fontsize=9,
+                color="gray",
+            )
+            bar_ax.set_xticks([])
+        bar_ax.tick_params(axis="x", rotation=45)
+        bar_ax.set_ylabel("GB")
+        bar_ax.set_ylim(0, _zero_based_upper(bar_values, min_upper=1.0))
+        bar_ax.set_title(f"overall peak {label} memory", fontweight="bold")
+        bar_ax.grid(axis="y", alpha=0.25)
 
-    fig.suptitle(f"peak edit memory | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
+    fig.legend(
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                color=method_colors[method],
+                lw=_line_style_for_method(method).get("linewidth", 2),
+                linestyle=_line_style_for_method(method).get("linestyle", "-"),
+                label=method,
+            )
+            for method in methods_sorted
+        ],
+        loc="center left",
+        bbox_to_anchor=(1.01, 0.5),
+        title="method",
+    )
+    fig.suptitle(f"edit memory | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)
     fig.tight_layout()
     plt.show()
 
