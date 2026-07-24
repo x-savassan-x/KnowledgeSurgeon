@@ -316,29 +316,6 @@ def _hardware_metadata_field(
     return "-"
 
 
-def _hardware_torch_label(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    torch_payload = payload.get("torch", {})
-    if not isinstance(torch_payload, dict):
-        return "-"
-    version = torch_payload.get("version")
-    cuda_version = torch_payload.get("cuda_version")
-    if version and cuda_version:
-        return f"{version} / CUDA {cuda_version}"
-    return str(version or cuda_version or "-")
-
-
-def _hardware_python_label(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    python_payload = payload.get("python", {})
-    if not isinstance(python_payload, dict):
-        return "-"
-    version = str(python_payload.get("version", "-"))
-    return version.split()[0] if version else "-"
-
-
 def table_hardware_results(
     model_key: str,
     milestones: list[int],
@@ -358,7 +335,6 @@ def table_hardware_results(
             evaluation_dir=evaluation_dir,
         )
         rows.append({
-            "run": run_index,
             "gpu": _hardware_gpu_label(payload),
             "gpu memory": _hardware_gpu_memory(payload),
             "gpu tflops": _hardware_metadata_field(
@@ -371,33 +347,6 @@ def table_hardware_results(
                     "gpu_fp16_tflops",
                 ),
             ),
-            "vram bw": _hardware_metadata_field(
-                payload,
-                (
-                    "provider_reported_vram_bandwidth_gbps",
-                    "gpu_mem_bandwidth_gbps",
-                    "memory_bandwidth_gbps",
-                    "vram_bandwidth_gbps",
-                ),
-                suffix=" GB/s",
-            ),
-            "pcie": _hardware_pcie_label(payload),
-            "pcie bw": _hardware_metadata_field(
-                payload,
-                (
-                    "provider_reported_pcie_bandwidth_gbps",
-                    "pcie_bandwidth_gbps",
-                ),
-                suffix=" GB/s",
-            ),
-            "dlperf": _hardware_metadata_field(
-                payload,
-                (
-                    "provider_reported_dlperf",
-                    "dlperf",
-                ),
-            ),
-            "driver": _hardware_first_gpu_field(payload, "driver_version"),
             "cpu": payload.get("cpu", {}).get("model", "-") if payload else "-",
             "cpu count": payload.get("cpu", {}).get("logical_count", "-") if payload else "-",
             "ram": (
@@ -405,8 +354,15 @@ def table_hardware_results(
                 if payload and payload.get("memory", {}).get("memtotal_gb") is not None
                 else "-"
             ),
-            "torch": _hardware_torch_label(payload),
-            "python": _hardware_python_label(payload),
+            "pcie": _hardware_pcie_label(payload),
+            "driver": _hardware_first_gpu_field(payload, "driver_version"),
+            "dlperf": _hardware_metadata_field(
+                payload,
+                (
+                    "provider_reported_dlperf",
+                    "dlperf",
+                ),
+            ),
         })
 
     df = pd.DataFrame(rows)
