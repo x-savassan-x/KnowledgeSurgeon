@@ -8,6 +8,7 @@ dependencies = [
     "huggingface_hub",
     "pandas",
     "numpy",
+    "scipy",
     # _____ AI _____
     "transformers",
     "sentence-transformers",
