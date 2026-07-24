@@ -97,20 +97,8 @@ class GRACE(Editor):
     @classmethod
     def _copy_adapter_state(cls, source: GraceAdapter, target: GraceAdapter) -> None:
         device = target.device
-
-        for name in ("keys", "epsilons"):
-            if hasattr(source, name):
-                setattr(target, name, cls._clone_tensor(getattr(source, name), device))
-            elif hasattr(target, name):
-                delattr(target, name)
-
-        if hasattr(source, "values"):
-            target.values = torch.nn.Parameter(
-                cls._clone_tensor(source.values, device),
-                requires_grad=source.values.requires_grad,
-            )
-        elif hasattr(target, "values"):
-            delattr(target, "values")
+        target.reset_training_state()
+        target.load_codebook(source.keys, source.values, source.epsilons)
 
         target.key_labels = [
             cls._clone_tensor(label, device) if isinstance(label, torch.Tensor) else copy.deepcopy(label)
