@@ -8,20 +8,20 @@ def lerp(
 ) -> Union[np.ndarray, torch.Tensor]:
     return (1 - t) * v0 + t * v1
 
-def maybe_torch(v: np.ndarray, is_torch: bool):
+def maybe_torch(v: np.ndarray, is_torch: bool) -> np.ndarray | torch.Tensor:
     if is_torch:
         return torch.from_numpy(v)
     return v
 
 
-def normalize(v: np.ndarray, eps: float):
+def normalize(v: np.ndarray, eps: float) -> np.ndarray:
     norm_v = np.linalg.norm(v)
     if norm_v > eps:
         v = v / norm_v
     return v
 
 class slerp:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
     def execute(
         self,
@@ -30,8 +30,8 @@ class slerp:
         v1: Union[List[torch.Tensor], torch.Tensor],
         DOT_THRESHOLD: float = 0.9995,
         eps: float = 1e-8,
-        densities = None,
-    ):
+        densities=None,
+    ) -> np.ndarray | torch.Tensor:
         if type(v0) is list:
             v0 = v0[0]
         if type(v1) is list:

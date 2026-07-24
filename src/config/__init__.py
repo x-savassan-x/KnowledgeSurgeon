@@ -59,7 +59,7 @@ def _merge_model_config(config: dict[str, Any], config_path: Path) -> dict[str, 
     return {**base_config, **config}
 
 
-def load_config(config_path) -> Config:
+def load_config(config_path: str | Path) -> Config:
     config_path = Path(config_path).resolve()
     config = _merge_model_config(_read_yaml(config_path), config_path)
 

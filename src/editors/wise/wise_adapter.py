@@ -1,5 +1,6 @@
 import copy
 import random
+from typing import Any
 
 import numpy as np
 import torch
@@ -25,7 +26,13 @@ edit_history = []
 merge_group_edit_history = []
 
 
-def euc(query, key, config, act_mask=None, infer=False):
+def euc(
+    query: Tensor,
+    key: Tensor,
+    config,
+    act_mask: Tensor | None = None,
+    infer: bool = False,
+) -> Tensor:
     act_fn = ACT2FN[config.hidden_act]
     l2_norm = torch.norm(act_fn(key) - act_fn(query), dim=-1)
     if l2_norm.dim() == 1:
@@ -40,48 +47,48 @@ def euc(query, key, config, act_mask=None, infer=False):
         return torch.mean(l2_norm, dim=-1)
 
 
-def _infer_score(dist):
+def _infer_score(dist: Tensor | float) -> Tensor | float:
     if isinstance(dist, torch.Tensor) and dist.dim() > 0:
         return dist.mean()
     return dist
 
 
 class EarlyStopMeter:
-    def __init__(self, patience=5, min_delta=1e-3):
+    def __init__(self, patience: int = 5, min_delta: float = 1e-3) -> None:
         self.patience = patience
         self.min_delta = min_delta
         self.best = None
         self.counter = 0
 
-    def update(self, val):
+    def update(self, val: float) -> None:
         if self.best is None or val < self.best - self.min_delta:
             self.best = val
             self.counter = 0
         else:
             self.counter += 1
 
-    def stop(self):
+    def stop(self) -> bool:
         return self.counter >= self.patience
 
 
 class EditingMeanAct:
-    def __init__(self, min_a=1e9):
+    def __init__(self, min_a: float = 1e9) -> None:
         self._min = min_a
         self._sum = 0.0
         self._cnt = 0
 
-    def update(self, val):
+    def update(self, val: float) -> None:
         self._sum += val
         self._cnt += 1
         if val < self._min:
             self._min = val
 
-    def min_act(self):
+    def min_act(self) -> float:
         return self._min
 
 
 class WISEAdapter(torch.nn.Module):
-    def __init__(self, config, layer):
+    def __init__(self, config, layer: torch.nn.Module) -> None:
         super().__init__()
         self.layer = layer
         self.weight = self.layer.weight
@@ -102,17 +109,17 @@ class WISEAdapter(torch.nn.Module):
         self.editing_mean_act = EditingMeanAct()
         self.editing_total_cnt = 0
 
-    def set_parameter_tunable(self):
+    def set_parameter_tunable(self) -> None:
         self.new_weight.requires_grad = True
 
-    def save_weight(self):
+    def save_weight(self) -> None:
         self.memory_weight.append(copy.deepcopy(self.new_weight))
         self.new_weight = copy.deepcopy(self.original_layer.weight)
         if self.config.retrieve:
             self.memory_mean_act.append(copy.deepcopy(self.editing_mean_act))
             self.editing_mean_act = EditingMeanAct()
 
-    def merge_weight(self):
+    def merge_weight(self) -> None:
         if self.config.save_freq is not None:
             if not self.config.retrieve:
                 merge_alg = merge_dict[self.config.merge_alg]
@@ -159,11 +166,11 @@ class WISEAdapter(torch.nn.Module):
             self.layer.weight = torch.nn.Parameter(cur_new_weight.to(self.layer.weight.device), requires_grad=False)
             self.new_weight = copy.deepcopy(self.original_layer.weight)
 
-    def save_editing_activation(self):
+    def save_editing_activation(self) -> None:
         in_scope_dist = euc(self.original_layer_output[:-1, ...], self.new_weight_layer_output[:-1, ...], self.config)
         self.editing_mean_act.update(in_scope_dist.mean().item())
 
-    def generate_activation_mask(self, mask_ratio):
+    def generate_activation_mask(self, mask_ratio: float) -> None:
         p_grad = self.new_weight.reshape(-1)
         p_mask = np.random.choice([1, 0], size=p_grad.size()[0], p=[mask_ratio, 1 - mask_ratio])
         p_mask = torch.from_numpy(p_mask).to(p_grad.device)
@@ -172,14 +179,14 @@ class WISEAdapter(torch.nn.Module):
     def new_weight_forward(self, input: Tensor) -> Tensor:
         return F.linear(input, self.new_weight)
 
-    def mask_new_weight_gradient(self):
+    def mask_new_weight_gradient(self) -> None:
         assert self.new_weight.grad is not None
         p_size = self.new_weight.grad.size()
         p_grad = self.new_weight.grad.reshape(-1)
         p_grad = p_grad * self.weight_mask
         self.new_weight.grad = p_grad.view(p_size).to(self.new_weight.grad.dtype)
 
-    def forward(self, *args):
+    def forward(self, *args) -> Any:
         if self.editing:
             layer_out = self.new_weight_forward(*args)
             self.new_weight_layer_output = layer_out
@@ -223,7 +230,7 @@ class WISEAdapter(torch.nn.Module):
 class WISEModule(torch.nn.Module):
     """Wraps a model with a WISE adapter on a specific layer."""
 
-    def __init__(self, config, model, device):
+    def __init__(self, config, model, device: torch.device | str) -> None:
         super().__init__()
         self.config = config
         self.model = model
@@ -260,7 +267,7 @@ class WISEModule(torch.nn.Module):
             setattr(self.edit_module, self.layer_name, WISEAdapter(config, adapter_layer))
             self.original_layer = copy.deepcopy(adapter_layer)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, **kwargs) -> Any:
         if not self.config.retrieve:
             adapter = self.get_adapter_layer()
             if hasattr(adapter, 'editing') and not adapter.editing:
@@ -278,17 +285,23 @@ class WISEModule(torch.nn.Module):
         else:
             return self.model(**kwargs)
 
-    def reset_layer(self):
+    def reset_layer(self) -> None:
         layer = getattr(self.edit_module, self.layer_name)
         del layer
         setattr(self.edit_module, self.layer_name, self.get_adapter_layer().original_layer)
 
-    def get_adapter_layer(self):
+    def get_adapter_layer(self) -> WISEAdapter:
         adapter_layer = getattr(self.edit_module, self.layer_name)
         assert type(adapter_layer) is WISEAdapter
         return adapter_layer.to(adapter_layer.device)
 
-    def edit(self, config, tokens, act_mask=None, deact_mask=None):
+    def edit(
+        self,
+        config,
+        tokens: dict[str, Tensor],
+        act_mask: list[Tensor | None] | None = None,
+        deact_mask: list[Tensor | None] | None = None,
+    ) -> None:
         global edit_history, merge_group_edit_history
         edit_history.append([{f"{k1}": v1.to('cpu') for k1, v1 in tokens.items()}, False])
         last_prompt_token_loc = (tokens["labels"] == -100).sum(dim=-1) - 1
@@ -377,7 +390,7 @@ class WISEModule(torch.nn.Module):
             edit_history = []
             self.get_adapter_layer().merge_weight()
 
-    def _norm_constraint(self, norm_constraint):
+    def _norm_constraint(self, norm_constraint: float) -> None:
         new_weight = self.get_adapter_layer().new_weight
         original_weight = self.get_adapter_layer().weight
         with torch.no_grad():
@@ -385,7 +398,11 @@ class WISEModule(torch.nn.Module):
                 new_weight, min=original_weight - norm_constraint, max=original_weight + norm_constraint
             )
 
-    def _cal_ft_loss(self, tokens, last_prompt_token_loc):
+    def _cal_ft_loss(
+        self,
+        tokens: dict[str, Tensor],
+        last_prompt_token_loc: Tensor,
+    ) -> Tensor:
         k = getattr(self.model.config, 'batch_size', 1)
         bs = tokens["input_ids"].shape[0] - k
         logits = self.model(**tokens).logits
@@ -402,8 +419,14 @@ class WISEModule(torch.nn.Module):
 
         return ((loss * label_mask).sum(1) / label_mask.sum(1)).mean()
 
-    def _cal_activation_loss(self, original_layer_output, new_weight_layer_output,
-                             config=None, act_mask=None, deact_mask=None):
+    def _cal_activation_loss(
+        self,
+        original_layer_output: Tensor,
+        new_weight_layer_output: Tensor,
+        config=None,
+        act_mask: list[Tensor | None] | None = None,
+        deact_mask: list[Tensor | None] | None = None,
+    ) -> Tensor:
         k = getattr(self.model.config, 'batch_size', 1)
         total_loss = []
         len_temp = original_layer_output.shape[0] / k - 1
@@ -448,15 +471,27 @@ class WISEModule(torch.nn.Module):
             total_loss.append(loss + loss2 + loss3)
         return sum(total_loss) / len(total_loss)
 
-    def _cal_memory_pos_activation_loss(self, original_layer_output, new_weight_layer_output,
-                                        config=None, act_mask=None, deact_mask=None):
+    def _cal_memory_pos_activation_loss(
+        self,
+        original_layer_output: Tensor,
+        new_weight_layer_output: Tensor,
+        config=None,
+        act_mask: list[Tensor | None] | None = None,
+        deact_mask: list[Tensor | None] | None = None,
+    ) -> Tensor:
         k = getattr(self.model.config, 'batch_size', 1)
         in_scope_dist = euc(original_layer_output[:-k, ...], new_weight_layer_output[:-k, ...], config)
         loss4 = 20 - in_scope_dist
         return torch.mean(loss4[loss4 > 0]) if min(loss4[loss4 > 0].size()) > 0 else torch.tensor(0.)
 
-    def _cal_memory_neg_activation_loss(self, original_layer_output, new_weight_layer_output,
-                                        config=None, act_mask=None, deact_mask=None):
+    def _cal_memory_neg_activation_loss(
+        self,
+        original_layer_output: Tensor,
+        new_weight_layer_output: Tensor,
+        config=None,
+        act_mask: list[Tensor | None] | None = None,
+        deact_mask: list[Tensor | None] | None = None,
+    ) -> Tensor:
         k = getattr(self.model.config, 'batch_size', 1)
         in_scope_dist = euc(original_layer_output[:-k, ...], new_weight_layer_output[:-k, ...], config)
         loss4 = in_scope_dist - 5

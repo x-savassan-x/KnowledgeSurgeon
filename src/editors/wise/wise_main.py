@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -13,8 +13,8 @@ def apply_wise_to_model(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
-    copy=False,
-    **kwargs: Any,
+    copy: bool = False,
+    **kwargs,
 ) -> Tuple[WISEModule, dict]:
     if copy:
         model = deepcopy(model)

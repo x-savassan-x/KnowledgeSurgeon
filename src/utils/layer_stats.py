@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, Callable, Iterable, Sequence
 
 import torch
 from datasets import load_dataset
@@ -62,22 +63,22 @@ def _configured_max_length(model, hparams) -> tuple[int, bool]:
 def layer_stats(
     model,
     tokenizer,
-    layer_name,
-    stats_dir,
-    ds_name,
-    to_collect,
-    sample_size=None,
-    precision=None,
-    progress=None,
-    force_recompute=False,
+    layer_name: str,
+    stats_dir: str | Path,
+    ds_name: str,
+    to_collect: Sequence[str],
+    sample_size: int | None = None,
+    precision: str | None = None,
+    progress: Callable[..., Iterable[Any]] | None = None,
+    force_recompute: bool = False,
     hparams=None,
-):
+) -> CombinedStat:
     if hparams is None:
         raise ValueError("hparams is required to resolve model-specific layer statistics.")
     npos, max_length_is_configured = _configured_max_length(model, hparams)
     batch_tokens = npos * 3
 
-    def get_ds():
+    def get_ds() -> TokenizedDataset:
         ds_config_map = {
             "wikitext": ("Salesforce/wikitext", "wikitext-103-raw-v1"),
             "wikitext2": ("Salesforce/wikitext", "wikitext-2-raw-v1"),

@@ -10,6 +10,8 @@ set_requires_grad recursively sets requires_grad in module parameters.
 import contextlib
 import inspect
 from collections import OrderedDict
+from collections.abc import Iterable, Iterator
+from typing import Any, Callable, Self
 
 import torch
 
@@ -47,16 +49,16 @@ class Trace(contextlib.AbstractContextManager):
 
     def __init__(
         self,
-        module,
-        layer=None,
-        retain_output=True,
-        retain_input=False,
-        clone=False,
-        detach=False,
-        retain_grad=False,
-        edit_output=None,
-        stop=False,
-    ):
+        module: torch.nn.Module,
+        layer: str | None = None,
+        retain_output: bool = True,
+        retain_input: bool = False,
+        clone: bool = False,
+        detach: bool = False,
+        retain_grad: bool = False,
+        edit_output: Callable[..., Any] | None = None,
+        stop: bool = False,
+    ) -> None:
         """
         Method to replace a forward method with a closure that
         intercepts the call, and tracks the hook so that it can be reverted.
@@ -66,7 +68,12 @@ class Trace(contextlib.AbstractContextManager):
         if layer is not None:
             module = get_module(module, layer)
 
-        def retain_hook(m, inputs, kwargs, output):
+        def retain_hook(
+            m: torch.nn.Module,
+            inputs: tuple[Any, ...],
+            kwargs: dict[str, Any],
+            output,
+        ) -> Any:
             """with_kwargs=True hook: PyTorch calls as (module, args, kwargs, output)."""
             if retain_input:
                 # Try to get input from positional args first
@@ -107,20 +114,27 @@ class Trace(contextlib.AbstractContextManager):
             self.registered_hook = module.register_forward_hook(retain_hook, with_kwargs=True)
         except TypeError:
             # Fallback for older PyTorch versions — no kwargs available
-            def legacy_hook(m, inputs, output):
+            def legacy_hook(
+                m: torch.nn.Module, inputs: tuple[Any, ...], output
+            ) -> Any:
                 return retain_hook(m, inputs, {}, output)
             self.registered_hook = module.register_forward_hook(legacy_hook)
         self.stop = stop
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback,
+    ) -> bool | None:
         self.close()
         if self.stop and issubclass(type, StopForward):
             return True
 
-    def close(self):
+    def close(self) -> None:
         self.registered_hook.remove()
 
 
@@ -144,19 +158,19 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
 
     def __init__(
         self,
-        module,
-        layers=None,
-        retain_output=True,
-        retain_input=False,
-        clone=False,
-        detach=False,
-        retain_grad=False,
-        edit_output=None,
-        stop=False,
-    ):
+        module: torch.nn.Module,
+        layers: Iterable[str] | None = None,
+        retain_output: bool = True,
+        retain_input: bool = False,
+        clone: bool = False,
+        detach: bool = False,
+        retain_grad: bool = False,
+        edit_output: Callable[..., Any] | None = None,
+        stop: bool = False,
+    ) -> None:
         self.stop = stop
 
-        def flag_last_unseen(it):
+        def flag_last_unseen(it: Iterable[str]) -> Iterator[tuple[bool, str]]:
             try:
                 it = iter(it)
                 prev = next(it)
@@ -183,15 +197,20 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
                 stop=stop and is_last,
             )
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback,
+    ) -> bool | None:
         self.close()
         if self.stop and issubclass(type, StopForward):
             return True
 
-    def close(self):
+    def close(self) -> None:
         for layer, trace in reversed(self.items()):
             trace.close()
 
@@ -212,7 +231,7 @@ class StopForward(Exception):
     pass
 
 
-def get_hidden_state(output):
+def get_hidden_state(output) -> torch.Tensor:
     """
     Return the primary hidden-state tensor from a transformer layer output.
     Decoder layers may return the tensor directly or wrap it as the first
@@ -227,7 +246,7 @@ def get_hidden_state(output):
     raise TypeError(f"Unsupported layer output type: {type(output)}")
 
 
-def replace_hidden_state(output, hidden_state):
+def replace_hidden_state(output, hidden_state: torch.Tensor) -> Any:
     """
     Replace the primary hidden-state tensor while preserving the original
     output container type.
@@ -245,7 +264,12 @@ def replace_hidden_state(output, hidden_state):
     raise TypeError(f"Unsupported layer output type: {type(output)}")
 
 
-def recursive_copy(x, clone=None, detach=None, retain_grad=None):
+def recursive_copy(
+    x,
+    clone: bool | None = None,
+    detach: bool | None = None,
+    retain_grad: bool | None = None,
+) -> Any:
     """
     Copies a reference to a tensor, or an object that contains tensors,
     optionally detaching and cloning the tensor(s).  If retain_grad is
@@ -272,7 +296,7 @@ def recursive_copy(x, clone=None, detach=None, retain_grad=None):
         assert False, f"Unknown type {type(x)} cannot be broken into tensors."
 
 
-def set_requires_grad(requires_grad, *models):
+def set_requires_grad(requires_grad: bool, *models) -> None:
     """
     Sets requires_grad true or false for all parameters within the
     models passed.
@@ -287,7 +311,7 @@ def set_requires_grad(requires_grad, *models):
             assert False, "unknown type %r" % type(model)
 
 
-def get_module(model, name):
+def get_module(model: torch.nn.Module, name: str) -> torch.nn.Module:
     """
     Finds the named module within the given model.
     """
@@ -297,7 +321,7 @@ def get_module(model, name):
     raise LookupError(name)
 
 
-def get_parameter(model, name):
+def get_parameter(model: torch.nn.Module, name: str) -> torch.nn.Parameter:
     """
     Finds the named parameter within the given model.
     """
@@ -307,7 +331,7 @@ def get_parameter(model, name):
     raise LookupError(name)
 
 
-def invoke_with_optional_args(fn, *args, **kwargs):
+def invoke_with_optional_args(fn: Callable[..., Any], *args, **kwargs) -> Any:
     """
     Invokes a function with only the arguments that it
     is written to accept, giving priority to arguments

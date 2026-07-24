@@ -132,7 +132,12 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def log_status(message: str, log_path: Path | str | None, verbose: bool = False, pbar=None) -> None:
+def log_status(
+    message: str,
+    log_path: Path | str | None,
+    verbose: bool = False,
+    pbar=None,
+) -> None:
     line = f"[{timestamp()}] {message}"
     if log_path is not None:
         path = Path(log_path)

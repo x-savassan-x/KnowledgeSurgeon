@@ -38,8 +38,8 @@ def bernoulli(
         res /= density
     return res.to(tensor.dtype)
 
-def rescaled_random(tensor: torch.Tensor, density: float):
+def rescaled_random(tensor: torch.Tensor, density: float) -> torch.Tensor:
     return bernoulli(tensor, density, rescale=True)
 
-def random_wo_rescaled(tensor: torch.Tensor, density: float):
+def random_wo_rescaled(tensor: torch.Tensor, density: float) -> torch.Tensor:
     return bernoulli(tensor, density, rescale=False)

@@ -18,9 +18,9 @@ def apply_rome_to_model(
     tok: AutoTokenizer,
     request: List[Dict],
     hparams,
-    copy=False,
-    return_orig_weights=False,
-    keep_original_weight=False,
+    copy: bool = False,
+    return_orig_weights: bool = False,
+    keep_original_weight: bool = False,
     **kwargs,
 ) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
     request = request[0]
@@ -134,7 +134,11 @@ def upd_matrix_match_shape(matrix: torch.Tensor, shape: torch.Size) -> torch.Ten
         )
 
 
-def get_context_templates(model, tok, length_params):
+def get_context_templates(
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+    length_params: List[Tuple[int, int]],
+) -> List[str]:
     global CONTEXT_TEMPLATES_CACHE
 
     if CONTEXT_TEMPLATES_CACHE is None:

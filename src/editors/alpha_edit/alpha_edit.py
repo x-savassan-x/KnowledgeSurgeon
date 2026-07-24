@@ -8,12 +8,12 @@ from .alpha_edit_main import apply_AlphaEdit_to_model
 
 
 class AlphaEdit(Editor):
-    def __init__(self, config: AlphaEditConfig, model=None, tokenizer=None):
+    def __init__(self, config: AlphaEditConfig, model=None, tokenizer=None) -> None:
         super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "right"
         self._initial_weights: dict[str, torch.Tensor] = {}
 
-    def reset(self):
+    def reset(self) -> None:
         if not self._initial_weights:
             return
         params = dict(self.model.named_parameters())
@@ -23,7 +23,7 @@ class AlphaEdit(Editor):
         # Reset AlphaEdit's cumulative cache so it reinitializes on next edit
         _ae_mod.cache_c_new = False
 
-    def edit(self, request: EditRequest):
+    def edit(self, request: EditRequest) -> None:
         ee_request = [{
             "prompt": request.prompt,
             "subject": request.subject,

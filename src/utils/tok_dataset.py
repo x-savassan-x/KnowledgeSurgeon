@@ -1,3 +1,5 @@
+from typing import Callable, MutableMapping
+
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
@@ -8,7 +10,13 @@ class TokenizedDataset(Dataset):
     Converts a dataset of text samples into a dataset of token sequences.
     """
 
-    def __init__(self, text_dataset, tokenizer=None, maxlen=None, field="text"):
+    def __init__(
+        self,
+        text_dataset,
+        tokenizer=None,
+        maxlen: int | None = None,
+        field: str | None = "text",
+    ) -> None:
         self.text_dataset = text_dataset
         self.field = field
         self.tokenizer = tokenizer
@@ -16,10 +24,10 @@ class TokenizedDataset(Dataset):
         if hasattr(text_dataset, "info"):
             self.info = text_dataset.info
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.text_dataset)
 
-    def __getitem__(self, i):
+    def __getitem__(self, i: int) -> dict[str, torch.Tensor]:
         text = self.text_dataset[i]
         if self.field is not None:
             text = text[self.field]
@@ -35,19 +43,21 @@ class TokenizedDataset(Dataset):
         )
 
 
-def dict_to_(data, device):
+def dict_to_(
+    data: MutableMapping[str, torch.Tensor], device: torch.device | str
+) -> MutableMapping[str, torch.Tensor]:
     for k in data:
         data[k] = data[k].to(device)
     return data
 
 
-def length_collation(token_size):
+def length_collation(token_size: int) -> Callable[[list[dict[str, torch.Tensor]]], list[dict[str, torch.Tensor]]]:
     """
     Sorts a batch of sequences and breaks it up into sub-batches
     of same-sized sequences, padding as needed.
     """
 
-    def collate_fn(items):
+    def collate_fn(items: list[dict[str, torch.Tensor]]) -> list[dict[str, torch.Tensor]]:
         items = sorted(items, key=lambda x: -len(x["input_ids"]))
         batches = []
         batch = []
@@ -70,7 +80,7 @@ def length_collation(token_size):
     return collate_fn
 
 
-def make_padded_batch(items):
+def make_padded_batch(items: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     max_len = max(len(d["input_ids"]) for d in items)
     if max_len == 0:
         return {k: torch.zeros((0, 0), dtype=torch.long) for k in items[0]}
@@ -83,7 +93,7 @@ def make_padded_batch(items):
     }
 
 
-def flatten_masked_batch(data, mask):
+def flatten_masked_batch(data: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     flat_data = data.view(-1, data.size(-1))
     attended_tokens = mask.to(data.device).view(-1).nonzero()[:, 0]
     return flat_data[attended_tokens]

@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 import torch
 from torch.nn import CrossEntropyLoss
@@ -14,10 +14,10 @@ def apply_ft_to_model(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
-    copy=False,
-    return_orig_weights=False,
-    keep_original_weight=False,
-    **kwargs: Any,
+    copy: bool = False,
+    return_orig_weights: bool = False,
+    keep_original_weight: bool = False,
+    **kwargs,
 ) -> Tuple[AutoModelForCausalLM, Dict[str, Any]]:
     """Apply an FT update and return copies of the weights that changed."""
     weights_copy = {}
@@ -41,7 +41,7 @@ def execute_ft(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
-    **kwargs: Any,
+    **kwargs,
 ) -> Dict[str, torch.Tensor]:
     """Compute a causal-LM fine-tuning update without retaining it in the model."""
     device = get_model_device(model, fallback=hparams.device)
@@ -148,22 +148,22 @@ def execute_ft(
     return deltas
 
 
-def chunks(items, size):
+def chunks(items: list[Any], size: int) -> Iterator[list[Any]]:
     """Yield successive chunks of at most ``size`` items."""
     for start in range(0, len(items), size):
         yield items[start : start + size]
 
 
 class AverageMeter:
-    def __init__(self):
+    def __init__(self) -> None:
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.avg = 0
         self.sum = 0
         self.count = 0
 
-    def update(self, value, n=1):
+    def update(self, value: float, n: int = 1) -> None:
         self.sum += value * n
         self.count += n
         self.avg = self.sum / self.count

@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -64,7 +64,7 @@ def compute_v(
     delta = torch.zeros((model.config.hidden_size,), requires_grad=True, device=delta_device)
     target_init, kl_distr_init = None, None
 
-    def edit_output_fn(cur_out, cur_layer):
+    def edit_output_fn(cur_out, cur_layer: str) -> Any:
         nonlocal target_init
         if cur_layer == hparams.mlp_module_tmp.format(layer):
             hidden_state = nethook.get_hidden_state(cur_out)
@@ -183,7 +183,7 @@ def get_module_input_output_at_word(
     word: str,
     module_template: str,
     fact_token_strategy: str,
-) -> Tuple[torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     word_repr_args = dict(
         model=model,
         tok=tok,
@@ -218,7 +218,7 @@ def find_fact_lookup_idx(
     subject: str,
     tok: AutoTokenizer,
     fact_token_strategy: str,
-    input_prompt=None
+    input_prompt: str | None = None,
 ) -> int:
     ret = None
     if fact_token_strategy == "last":

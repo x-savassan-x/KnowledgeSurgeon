@@ -37,6 +37,6 @@ class RRomeConfig(Config):
     enable_random_prefix_keys: bool = True
     original_implementation: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.stats_dir = resolve_project_path(self.stats_dir)

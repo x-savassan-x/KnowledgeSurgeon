@@ -32,6 +32,6 @@ class RomeConfig(Config):
     mom2_dtype: str = "float32"
     stats_dir: str = "data/assets/layer_stats"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.stats_dir = resolve_project_path(self.stats_dir)

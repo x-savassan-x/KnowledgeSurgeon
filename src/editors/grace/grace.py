@@ -13,14 +13,14 @@ from .utils import brackets_to_periods, parent_module, tokenize
 class GRACE(Editor):
     config: GraceConfig
 
-    def __init__(self, config: GraceConfig, model=None, tokenizer=None):
+    def __init__(self, config: GraceConfig, model=None, tokenizer=None) -> None:
         super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "left"
         self._base_model = self.model
         self._grace_model: GraceCore | None = None
         self._reset_layer = None
 
-    def edit(self, request: EditRequest):
+    def edit(self, request: EditRequest) -> None:
         ee_request = [{
             "prompt": request.prompt,
             "target_new": request.new_ground_truth,
@@ -45,7 +45,7 @@ class GRACE(Editor):
 
         self._grace_model.set_inference_mode()
 
-    def reset(self):
+    def reset(self) -> None:
         if self._reset_layer is not None:
             self._reset_layer()
             self._reset_layer = None

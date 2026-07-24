@@ -1,21 +1,21 @@
 import unicodedata
-from typing import List
+from typing import Sequence
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from .devices import get_model_device
 
 
 def generate_fast(
-    model: AutoModelForCausalLM,
-    tok: AutoTokenizer,
-    prompts: List[str],
+    model: PreTrainedModel,
+    tok: PreTrainedTokenizerBase,
+    prompts: Sequence[str],
     n_gen_per_prompt: int = 1,
     top_k: int = 5,
     max_out_len: int = 200,
-    vanilla_generation=False,
-):
+    vanilla_generation: bool = False,
+) -> list[str]:
     """
     Fast, parallelized auto-regressive text generation with top-k sampling.
     Our custom implementation.

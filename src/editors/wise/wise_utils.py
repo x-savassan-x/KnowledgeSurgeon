@@ -1,12 +1,19 @@
+from typing import Any, Sequence
+
 import torch
 
 from ...utils.generate import generate_fast
 
 
-CONTEXT_TEMPLATES_CACHE = None
+CONTEXT_TEMPLATES_CACHE: list[str] | None = None
 
 
-def get_context_templates(model, tok, length_params, device):
+def get_context_templates(
+    model,
+    tok,
+    length_params: Sequence[tuple[int, int]],
+    device: torch.device | str,
+) -> list[str]:
     global CONTEXT_TEMPLATES_CACHE
 
     if CONTEXT_TEMPLATES_CACHE is None:
@@ -31,14 +38,14 @@ def get_context_templates(model, tok, length_params, device):
     return CONTEXT_TEMPLATES_CACHE
 
 
-def find_sublist_start_index(list1, list2):
+def find_sublist_start_index(list1: Sequence[int], list2: Sequence[int]) -> int | None:
     for i in range(len(list1) - len(list2) + 1):
         if all(a == b for a, b in zip(list1[i:i + len(list2)], list2)):
             return i
     return None
 
 
-def parent_module(model, pname):
+def parent_module(model, pname: str) -> Any:
     components = pname.split('.')
     parent = model
     for component in components[:-1]:
@@ -53,11 +60,17 @@ def parent_module(model, pname):
     return parent
 
 
-def brackets_to_periods(name):
+def brackets_to_periods(name: str) -> str:
     return name.replace("[", ".").replace("]", "")
 
 
-def tokenize(batch, tokenizer, device, context_templates, hparams):
+def tokenize(
+    batch: list[dict[str, Any]],
+    tokenizer,
+    device: torch.device | str,
+    context_templates: list[str],
+    hparams,
+) -> tuple[dict[str, torch.Tensor], list[torch.Tensor | None], list[torch.Tensor | None]]:
     len_temp = len(context_templates)
     prompts = [item['prompt'] for item in batch]
     labels = [item['target_new'] for item in batch]

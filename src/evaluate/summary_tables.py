@@ -20,7 +20,7 @@ from .summary_utils import (
 )
 
 
-def _centered_style(df: pd.DataFrame, hide_index: bool = False):
+def _centered_style(df: pd.DataFrame, hide_index: bool = False) -> Any:
     style = df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [dict(selector="th", props=[("text-align", "center")])]
     )
@@ -272,7 +272,7 @@ def _hardware_pcie_label(payload: dict[str, Any] | None) -> str:
     return "-"
 
 
-def _format_hardware_value(value: Any, suffix: str = "") -> str:
+def _format_hardware_value(value, suffix: str = "") -> str:
     if value in (None, ""):
         return "-"
     try:

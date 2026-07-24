@@ -2,25 +2,25 @@
 Utilities for extracting token representations and indices from string templates.
 """
 
-from typing import List
+from collections.abc import Iterator, Sequence
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from .devices import get_model_device
 from . import nethook
 
 
 def get_reprs_at_word_tokens(
-    model: AutoModelForCausalLM,
-    tok: AutoTokenizer,
-    context_templates: List[str],
-    words: List[str],
+    model: PreTrainedModel,
+    tok: PreTrainedTokenizerBase,
+    context_templates: Sequence[str],
+    words: Sequence[str],
     layer: int,
     module_template: str,
     subtoken: str,
     track: str = "in",
-) -> torch.Tensor:
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     idxs = get_words_idxs_in_templates(tok, context_templates, words, subtoken)
     return get_reprs_at_idxs(
         model,
@@ -34,8 +34,11 @@ def get_reprs_at_word_tokens(
 
 
 def get_words_idxs_in_templates(
-    tok: AutoTokenizer, context_templates: str, words: str, subtoken: str
-) -> int:
+    tok: PreTrainedTokenizerBase,
+    context_templates: Sequence[str],
+    words: Sequence[str],
+    subtoken: str,
+) -> list[list[int]]:
     assert all(
         tmp.count("{}") == 1 for tmp in context_templates
     ), f"We currently do not support multiple fill-ins for context: {context_templates}"
@@ -67,15 +70,17 @@ def get_words_idxs_in_templates(
 
 
 def get_reprs_at_idxs(
-    model: AutoModelForCausalLM,
-    tok: AutoTokenizer,
-    contexts: List[str],
-    idxs: List[List[int]],
+    model: PreTrainedModel,
+    tok: PreTrainedTokenizerBase,
+    contexts: Sequence[str],
+    idxs: Sequence[Sequence[int]],
     layer: int,
     module_template: str,
     track: str = "in",
-) -> torch.Tensor:
-    def _batch(n):
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    def _batch(
+        n: int,
+    ) -> Iterator[tuple[Sequence[str], Sequence[Sequence[int]]]]:
         for i in range(0, len(contexts), n):
             yield contexts[i : i + n], idxs[i : i + n]
 
@@ -86,9 +91,11 @@ def get_reprs_at_idxs(
         (track == "out" or both),
     )
     module_name = module_template.format(layer)
-    to_return = {"in": [], "out": []}
+    to_return: dict[str, list[torch.Tensor]] = {"in": [], "out": []}
 
-    def _process(cur_repr, batch_idxs, key):
+    def _process(
+        cur_repr, batch_idxs: Sequence[Sequence[int]], key: str
+    ) -> None:
         nonlocal to_return
         cur_repr = nethook.get_hidden_state(cur_repr)
         if cur_repr.shape[0] != len(batch_idxs):

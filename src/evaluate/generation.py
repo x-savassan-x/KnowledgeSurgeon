@@ -108,7 +108,7 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
         tokenizer.padding_side = orig_padding_side
 
 
-def parse_cuda_device_index(value: Any) -> int:
+def parse_cuda_device_index(value) -> int:
     if isinstance(value, int):
         return value
     text = str(value).strip().lower()

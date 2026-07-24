@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -14,7 +14,7 @@ def compute_z(
     request: Dict,
     hparams,
     layer: int,
-    context_templates: List[str],
+    context_templates: List[List[str]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the value (right) vector for the rank-1 update.
@@ -87,7 +87,7 @@ def compute_z(
     target_init, kl_distr_init = None, None
 
     # Inserts new "delta" variable at the appropriate part of the computation
-    def edit_output_fn(cur_out, cur_layer):
+    def edit_output_fn(cur_out, cur_layer: str) -> Any:
         nonlocal target_init
 
         if cur_layer == hparams.layer_module_tmp.format(layer):
@@ -209,7 +209,7 @@ def get_module_input_output_at_words(
     words: List[str],
     module_template: str,
     fact_token_strategy: str,
-) -> Tuple[torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Retrieves detached representations for a word at the input and
     output of a particular layer module.

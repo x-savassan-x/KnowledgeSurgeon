@@ -1,4 +1,9 @@
-def parent_module(model, pname):
+from typing import Any
+
+import torch
+
+
+def parent_module(model, pname: str) -> Any:
     components = pname.split(".")
     parent = model
 
@@ -16,11 +21,16 @@ def parent_module(model, pname):
     return parent
 
 
-def brackets_to_periods(name):
+def brackets_to_periods(name: str) -> str:
     return name.replace("[", ".").replace("]", "")
 
 
-def tokenize(batch, tokenizer, device, test=False):
+def tokenize(
+    batch: dict[str, Any],
+    tokenizer,
+    device: torch.device | str,
+    test: bool = False,
+) -> dict[str, torch.Tensor]:
     prompt, label = batch["prompt"], batch["target_new"]
     if not isinstance(prompt, list):
         prompt = [prompt]

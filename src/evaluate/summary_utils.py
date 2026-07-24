@@ -31,7 +31,7 @@ def _runs_from_count(n_runs: int) -> list[int]:
     return list(range(1, n_runs + 1))
 
 
-def _score_from_metric(metric_value: Any) -> float | None:
+def _score_from_metric(metric_value) -> float | None:
     if metric_value is None:
         return None
     if isinstance(metric_value, dict):
@@ -66,11 +66,15 @@ def _final_milestone_value(values: list[float | None]) -> float | None:
     return values[-1]
 
 
-def _valid_numbers(values) -> list[float]:
+def _valid_numbers(values: list[Any]) -> list[float]:
     return [float(value) for value in values if value is not None]
 
 
-def _zero_based_upper(values, pad_ratio: float = 0.08, min_upper: float = 0.05) -> float:
+def _zero_based_upper(
+    values: list[Any],
+    pad_ratio: float = 0.08,
+    min_upper: float = 0.05,
+) -> float:
     valid_values = _valid_numbers(values)
     if not valid_values:
         return min_upper
@@ -146,7 +150,7 @@ def _avg_time_series_from_edit_times(edit_times: list[float], milestones: list[i
     return series
 
 
-def _load_json_if_exists(path: Path):
+def _load_json_if_exists(path: Path) -> Any | None:
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as file:

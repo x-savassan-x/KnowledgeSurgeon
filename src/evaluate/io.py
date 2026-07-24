@@ -147,7 +147,7 @@ def build_milestone_result_path(
     return method_dir / result_group / f"{result_name}.{run_index}.{step}.json"
 
 
-def _write_json(path: Path, payload: Any) -> None:
+def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         with open(path, "w", encoding="utf-8") as file:

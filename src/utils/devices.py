@@ -1,9 +1,7 @@
-from typing import Any
-
 import torch
 
 
-def get_model_device(model: torch.nn.Module, fallback: Any | None = None) -> torch.device:
+def get_model_device(model: torch.nn.Module, fallback=None) -> torch.device:
     """Return the device that should receive model inputs."""
     device = getattr(model, "device", None)
     if device is not None:
@@ -25,7 +23,7 @@ def get_model_device(model: torch.nn.Module, fallback: Any | None = None) -> tor
 def get_module_device(
     model: torch.nn.Module,
     name: str,
-    fallback: Any | None = None,
+    fallback=None,
 ) -> torch.device:
     for module_name, module in model.named_modules():
         if module_name != name:
@@ -54,7 +52,7 @@ def to_param_device(
     return tensor.to(device=param.device, dtype=target_dtype)
 
 
-def copy_to_param(param: torch.Tensor, value: Any) -> None:
+def copy_to_param(param: torch.Tensor, value) -> None:
     """Copy a tensor-like value into a parameter using the parameter's dtype/device."""
     if not torch.is_tensor(value):
         value = torch.as_tensor(value)

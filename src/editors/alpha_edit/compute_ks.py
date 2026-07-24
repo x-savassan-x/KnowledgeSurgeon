@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
@@ -10,11 +10,11 @@ from .compute_z import get_module_input_output_at_words
 def compute_ks(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    requests: Dict,
+    requests: List[Dict[str, Any]],
     hparams,
     layer: int,
-    context_templates: List[str],
-):
+    context_templates: List[List[str]],
+) -> torch.Tensor:
     layer_ks = get_module_input_output_at_words(
         model,
         tok,

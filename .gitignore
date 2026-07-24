@@ -3,7 +3,6 @@ data
 src_orig
 thesis
 
-notebook/data.ipynb
 notebook/test.ipynb
 
 # Byte-compiled / optimized / DLL files

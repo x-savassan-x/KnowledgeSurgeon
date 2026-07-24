@@ -12,18 +12,18 @@ from .wise_main import apply_wise_to_model
 class WISE(Editor):
     config: WiseConfig
 
-    def __init__(self, config: WiseConfig, model=None, tokenizer=None):
+    def __init__(self, config: WiseConfig, model=None, tokenizer=None) -> None:
         super().__init__(config, model=model, tokenizer=tokenizer)
         self.tokenizer.padding_side = "left"
         self.config.sequential_edit = True
         self._wise_editor: WISEModule | None = None
 
-    def reset(self):
+    def reset(self) -> None:
         if self._wise_editor is not None:
             self._wise_editor.reset_layer()
             self._wise_editor = None
  
-    def edit(self, request: EditRequest):
+    def edit(self, request: EditRequest) -> None:
         ee_request = [{
             "prompt": request.prompt,
             "target_new": request.new_ground_truth,

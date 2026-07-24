@@ -1,4 +1,5 @@
 from importlib import import_module
+from typing import Any
 
 from .schema import (
     EvalRecord,
@@ -47,7 +48,7 @@ _LAZY_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     module_name = _LAZY_EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

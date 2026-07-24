@@ -1,13 +1,18 @@
-from typing import Dict, Union, Tuple, List, Any, Literal, Optional
+from collections.abc import Sequence
+from typing import Literal
 
-import numpy as np
 import torch
 
 from .utils import rescaled_random, magnitude, random_wo_rescaled
 
 
 class GTA:
-    def __init__(self, sparsify_method=None, consensus_method=None, normalize=False):
+    def __init__(
+        self,
+        sparsify_method: str | None = None,
+        consensus_method: str | None = None,
+        normalize: bool = False,
+    ) -> None:
         self.sparsify_method = sparsify_method
         self.consensus_method = consensus_method
 
@@ -15,10 +20,10 @@ class GTA:
 
     def execute(
             self,
-            weights,
-            base,
-            tensors,
-            densities,
+            weights: Sequence[float],
+            base: torch.Tensor,
+            tensors: Sequence[torch.Tensor],
+            densities: float,
             **_kwargs,
     ) -> torch.Tensor:
         # collect task vectors
@@ -76,9 +81,9 @@ class GTA:
         return (base + mixed_delta).to(base.dtype)
 
 def get_task_vectors(
-    base: Union[np.ndarray, torch.Tensor],
-    tensors: Union[List[np.ndarray], List[torch.Tensor]],
-) -> Tuple[List[Dict[str, Any]], torch.Tensor]:
+    base: torch.Tensor,
+    tensors: Sequence[torch.Tensor],
+) -> tuple[list[torch.Tensor], torch.Tensor]:
 
     res = []
     for x in tensors:
@@ -90,8 +95,8 @@ def get_task_vectors(
 def get_mask(
     delta: torch.Tensor,
     method: Literal["sum", "count"] = "sum",
-    mask_dtype: Optional[torch.dtype] = None,
-):
+    mask_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
     """Returns a mask determining which delta vectors should be merged
     into the final model.
 

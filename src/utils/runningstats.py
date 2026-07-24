@@ -36,13 +36,21 @@ saved to and loaded from numpy npz files.
 import os
 import random
 import struct
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any
 
 import numpy
 import torch
 from torch.utils.data.sampler import Sampler
 
 
-def tally(stat, dataset, cache=None, quiet=False, **kwargs):
+def tally(
+    stat: "Stat",
+    dataset,
+    cache: str | dict[str, Any] | None = None,
+    quiet: bool = False,
+    **kwargs,
+) -> Iterator[Any]:
     """
     To use tally, write code like the following.
 
@@ -96,14 +104,14 @@ def tally(stat, dataset, cache=None, quiet=False, **kwargs):
     if cached_state is not None:
         stat.load_state_dict(cached_state)
 
-        def empty_loader():
+        def empty_loader() -> Iterator[Any]:
             return
             yield
 
         return empty_loader()
     loader = make_loader(dataset, **kwargs)
 
-    def wrapped_loader():
+    def wrapped_loader() -> Iterator[Any]:
         yield from loader
         stat.to_(device="cpu")
         if cache is not None:
@@ -118,16 +126,21 @@ class cache_load_enabled:
     tally from loading cached statsitics, forcing them to be recomputed.
     """
 
-    def __init__(self, enabled=True):
+    def __init__(self, enabled: bool = True) -> None:
         self.prev = False
         self.enabled = enabled
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         global global_load_cache_enabled
         self.prev = global_load_cache_enabled
         global_load_cache_enabled = self.enabled
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback,
+    ) -> None:
         global global_load_cache_enabled
         global_load_cache_enabled = self.prev
 
@@ -137,14 +150,14 @@ class Stat:
     Abstract base class for a running pytorch statistic.
     """
 
-    def __init__(self, state):
+    def __init__(self, state) -> None:
         """
         By convention, all Stat subclasses can be initialized by passing
         state=; and then they will initialize by calling load_state_dict.
         """
         self.load_state_dict(resolve_state_dict(state))
 
-    def add(self, x, *args, **kwargs):
+    def add(self, x, *args, **kwargs) -> None:
         """
         Observes a batch of samples to be incorporated into the statistic.
         Dimension 0 should be the batch dimension, and dimension 1 should
@@ -152,51 +165,51 @@ class Stat:
         """
         pass
 
-    def load_state_dict(self, d):
+    def load_state_dict(self, d: Mapping[str, Any]) -> None:
         """
         Loads this Stat from a dictionary of numpy arrays as saved
         by state_dict.
         """
         pass
 
-    def state_dict(self):
+    def state_dict(self) -> dict[str, Any]:
         """
         Saves this Stat as a dictionary of numpy arrays that can be
         stored in an npz or reloaded later using load_state_dict.
         """
         return {}
 
-    def save(self, filename):
+    def save(self, filename: str) -> None:
         """
         Saves this stat as an npz file containing the state_dict.
         """
         save_cached_state(filename, self, {})
 
-    def load(self, filename):
+    def load(self, filename: str) -> None:
         """
         Loads this stat from an npz file containing a saved state_dict.
         """
         self.load_state_dict(load_cached_state(filename, {}, quiet=True, throw=True))
 
-    def to_(self, device):
+    def to_(self, device: torch.device | str) -> None:
         """
         Moves this Stat to the given device.
         """
         pass
 
-    def cpu_(self):
+    def cpu_(self) -> None:
         """
         Moves this Stat to the cpu device.
         """
         self.to_("cpu")
 
-    def cuda_(self):
+    def cuda_(self) -> None:
         """
         Moves this Stat to the default cuda device.
         """
         self.to_("cuda")
 
-    def _normalize_add_shape(self, x, attr="data_shape"):
+    def _normalize_add_shape(self, x, attr: str = "data_shape") -> torch.Tensor:
         """
         Flattens input data to 2d.
         """
@@ -212,7 +225,9 @@ class Stat:
             assert x.shape[1:] == data_shape
         return x.view(x.shape[0], int(numpy.prod(data_shape)))
 
-    def _restore_result_shape(self, x, attr="data_shape"):
+    def _restore_result_shape(
+        self, x: torch.Tensor, attr: str = "data_shape"
+    ) -> torch.Tensor:
         """
         Restores output data to input data shape.
         """
@@ -227,7 +242,7 @@ class Mean(Stat):
     Running mean.
     """
 
-    def __init__(self, state=None):
+    def __init__(self, state=None) -> None:
         if state is not None:
             return super().__init__(state)
         self.count = 0
@@ -235,7 +250,7 @@ class Mean(Stat):
         self._mean = None
         self.data_shape = None
 
-    def add(self, a):
+    def add(self, a) -> None:
         a = self._normalize_add_shape(a)
         if len(a) == 0:
             return
@@ -254,17 +269,17 @@ class Mean(Stat):
         delta = batch_mean.sub_(self._mean).mul_(new_frac)
         self._mean.add_(delta)
 
-    def size(self):
+    def size(self) -> int:
         return self.count
 
-    def mean(self):
+    def mean(self) -> torch.Tensor:
         return self._restore_result_shape(self._mean)
 
-    def to_(self, device):
+    def to_(self, device: torch.device | str) -> None:
         if self._mean is not None:
             self._mean = self._mean.to(device)
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
         self.count = state["count"]
         self.batchcount = state["batchcount"]
         self._mean = torch.from_numpy(state["mean"])
@@ -272,7 +287,7 @@ class Mean(Stat):
             None if state["data_shape"] is None else tuple(state["data_shape"])
         )
 
-    def state_dict(self):
+    def state_dict(self) -> dict[str, Any]:
         return dict(
             constructor=self.__module__ + "." + self.__class__.__name__ + "()",
             count=self.count,
@@ -287,10 +302,10 @@ class NormMean(Mean):
     Running average of the norm of input vectors
     """
 
-    def __init__(self, state=None):
+    def __init__(self, state=None) -> None:
         super().__init__(state)
 
-    def add(self, a):
+    def add(self, a) -> None:
         super().add(a.norm(dim=-1))
 
 
@@ -301,14 +316,14 @@ class SecondMoment(Stat):
     in the GPU.
     """
 
-    def __init__(self, split_batch=True, state=None):
+    def __init__(self, split_batch: bool = True, state=None) -> None:
         if state is not None:
             return super().__init__(state)
         self.count = 0
         self.mom2 = None
         self.split_batch = split_batch
 
-    def add(self, a):
+    def add(self, a) -> None:
         a = self._normalize_add_shape(a)
         if len(a) == 0:
             return
@@ -320,21 +335,21 @@ class SecondMoment(Stat):
         self.count += batch_count
         self.mom2 += a.t().mm(a)
 
-    def to_(self, device):
+    def to_(self, device: torch.device | str) -> None:
         if self.mom2 is not None:
             self.mom2 = self.mom2.to(device)
 
-    def moment(self):
+    def moment(self) -> torch.Tensor:
         return self.mom2 / self.count
 
-    def state_dict(self):
+    def state_dict(self) -> dict[str, Any]:
         return dict(
             constructor=self.__module__ + "." + self.__class__.__name__ + "()",
             count=self.count,
             mom2=self.mom2.cpu().numpy(),
         )
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
         self.count = int(state["count"])
         self.mom2 = torch.from_numpy(state["mom2"])
 
@@ -354,37 +369,37 @@ class CombinedStat(Stat):
         print(cs.q.median())
     """
 
-    def __init__(self, state=None, **kwargs):
+    def __init__(self, state=None, **kwargs: "Stat") -> None:
         self._objs = kwargs
         if state is not None:
             return super().__init__(state)
 
-    def __getattr__(self, k):
+    def __getattr__(self, k: str) -> "Stat":
         if k in self._objs:
             return self._objs[k]
         raise AttributeError()
 
-    def add(self, d, *args, **kwargs):
+    def add(self, d, *args, **kwargs) -> None:
         for obj in self._objs.values():
             obj.add(d, *args, **kwargs)
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
         for prefix, obj in self._objs.items():
             obj.load_state_dict(pull_key_prefix(prefix, state))
 
-    def state_dict(self):
+    def state_dict(self) -> dict[str, Any]:
         result = {}
         for prefix, obj in self._objs.items():
             result.update(push_key_prefix(prefix, obj.state_dict()))
         return result
 
-    def to_(self, device):
+    def to_(self, device: torch.device | str) -> None:
         """Switches internal storage to specified device."""
         for v in self._objs.values():
             v.to_(device)
 
 
-def push_key_prefix(prefix, d):
+def push_key_prefix(prefix: str, d: Mapping[str, Any]) -> dict[str, Any]:
     """
     Returns a dict with the same values as d, but where each key
     adds the prefix, followed by a dot.
@@ -392,7 +407,7 @@ def push_key_prefix(prefix, d):
     return {prefix + "." + k: v for k, v in d.items()}
 
 
-def pull_key_prefix(prefix, d):
+def pull_key_prefix(prefix: str, d: Mapping[str, Any]) -> dict[str, Any]:
     """
     Returns a filtered dict of all the items of d that start with
     the given key prefix, plus a dot, with that prefix removed.
@@ -415,7 +430,7 @@ null_numpy_value = numpy.array(
 )
 
 
-def is_null_numpy_value(v):
+def is_null_numpy_value(v) -> bool:
     """
     True if v is a 64-bit float numpy scalar NaN matching null_numpy_value.
     """
@@ -428,7 +443,7 @@ def is_null_numpy_value(v):
     )
 
 
-def box_numpy_null(d):
+def box_numpy_null(d) -> Any:
     """
     Replaces None with null_numpy_value, leaving non-None values unchanged.
     Recursively descends into a dictionary replacing None values.
@@ -439,7 +454,7 @@ def box_numpy_null(d):
         return null_numpy_value if d is None else d
 
 
-def unbox_numpy_null(d):
+def unbox_numpy_null(d) -> Any:
     """
     Reverses box_numpy_null, replacing null_numpy_value with None.
     Recursively descends into a dictionary replacing None values.
@@ -450,7 +465,7 @@ def unbox_numpy_null(d):
         return None if is_null_numpy_value(d) else d
 
 
-def resolve_state_dict(s):
+def resolve_state_dict(s: str | Mapping[str, Any]) -> Any:
     """
     Resolves a state, which can be a filename or a dict-like object.
     """
@@ -462,7 +477,12 @@ def resolve_state_dict(s):
 global_load_cache_enabled = True
 
 
-def load_cached_state(cachefile, args, quiet=False, throw=False):
+def load_cached_state(
+    cachefile: str | dict[str, Any] | None,
+    args: Mapping[str, Any],
+    quiet: bool = False,
+    throw: bool = False,
+) -> Any | None:
     """
     Resolves a state, which can be a filename or a dict-like object.
     """
@@ -489,7 +509,11 @@ def load_cached_state(cachefile, args, quiet=False, throw=False):
         return dat
 
 
-def save_cached_state(cachefile, obj, args):
+def save_cached_state(
+    cachefile: str | dict[str, Any] | None,
+    obj: Stat,
+    args: Mapping[str, Any],
+) -> None:
     """
     Saves the state_dict of the given object in a dict or npz file.
     """
@@ -508,18 +532,18 @@ def save_cached_state(cachefile, obj, args):
         numpy.savez(cachefile, **box_numpy_null(dat))
 
 
-class FixedSubsetSampler(Sampler):
+class FixedSubsetSampler(Sampler[int]):
     """Represents a fixed sequence of data set indices.
     Subsets can be created by specifying a subset of output indexes.
     """
 
-    def __init__(self, samples):
+    def __init__(self, samples: Sequence[int]) -> None:
         self.samples = samples
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return iter(self.samples)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
 class FixedRandomSubsetSampler(FixedSubsetSampler):
@@ -530,7 +554,13 @@ class FixedRandomSubsetSampler(FixedSubsetSampler):
         seed (optional)
     """
 
-    def __init__(self, data_source, start=None, end=None, seed=1):
+    def __init__(
+        self,
+        data_source,
+        start: int | None = None,
+        end: int | None = None,
+        seed: int = 1,
+    ) -> None:
         rng = random.Random(seed)
         shuffled = list(range(len(data_source)))
         rng.shuffle(shuffled)
@@ -538,8 +568,13 @@ class FixedRandomSubsetSampler(FixedSubsetSampler):
 
 
 def make_loader(
-    dataset, sample_size=None, batch_size=1, sampler=None, random_sample=None, **kwargs
-):
+    dataset,
+    sample_size: int | None = None,
+    batch_size: int = 1,
+    sampler: Sampler[int] | None = None,
+    random_sample: int | None = None,
+    **kwargs,
+) -> torch.utils.data.DataLoader:
     """Utility for creating a dataloader on fixed sample subset."""
     import typing
 

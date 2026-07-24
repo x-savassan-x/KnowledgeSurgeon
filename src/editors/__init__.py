@@ -23,7 +23,12 @@ EDITOR_REGISTRY: dict[str, type[Editor]] = {
 }
 
 
-def load_editor(config_path: str, model=None, tokenizer=None, gpu_id: int | None = None) -> Editor:
+def load_editor(
+    config_path: str,
+    model=None,
+    tokenizer=None,
+    gpu_id: int | None = None,
+) -> Editor:
     config = load_config(config_path)
     if gpu_id is not None:
         config.gpu_id = int(gpu_id)

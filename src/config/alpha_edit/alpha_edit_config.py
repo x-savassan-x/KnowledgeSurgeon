@@ -30,7 +30,7 @@ class AlphaEditConfig(Config):
     L2: float = 10
     P_loc: str = "data/assets/alpha_edit_projectors/null_space_project.pt"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.stats_dir = resolve_project_path(self.stats_dir)
         self.P_loc = resolve_project_path(self.P_loc)

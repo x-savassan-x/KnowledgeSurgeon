@@ -9,7 +9,12 @@ from .editor_utils import EditRequest
 
 
 class Editor(ABC):
-    def __init__(self, config: Config, model=None, tokenizer=None):
+    def __init__(
+        self,
+        config: Config,
+        model=None,
+        tokenizer=None,
+    ) -> None:
         self.config = config
         self.device = config.device
 
@@ -38,10 +43,10 @@ class Editor(ABC):
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     @abstractmethod
-    def edit(self, request: EditRequest):...
+    def edit(self, request: EditRequest) -> None: ...
 
     @abstractmethod
-    def reset(self):...
+    def reset(self) -> None: ...
 
     def sync_generation_state_to(self, target: "Editor") -> None:
         """Copy the current inference state into a generation-only editor."""

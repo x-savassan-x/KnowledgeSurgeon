@@ -13,10 +13,10 @@ def apply_grace_to_model(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
-    copy=False,
-    return_orig_weights=False,
-    keep_original_weight=False,
-    **kwargs: Any,
+    copy: bool = False,
+    return_orig_weights: bool = False,
+    keep_original_weight: bool = False,
+    **kwargs,
 ) -> Tuple[GraceCore, Any]:
     request = requests[0]
     if copy:

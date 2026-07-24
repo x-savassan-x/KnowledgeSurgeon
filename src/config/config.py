@@ -53,7 +53,7 @@ class Config:
     # Model-specific limits for activation statistics used by ROME-family methods.
     layer_stats_max_length: int | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.model_key or Path(self.model_key).name != self.model_key:
             raise ValueError("model_key must be a non-empty path-safe slug.")
         if self.layer_stats_max_length is not None and self.layer_stats_max_length <= 0:

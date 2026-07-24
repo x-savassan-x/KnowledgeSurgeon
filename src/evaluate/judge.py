@@ -107,42 +107,77 @@ async def get_judge_scores(records: list[EvalRecord], **config) -> None:
     verbose = config.get("verbose", False)
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-    semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _score_batch(batch: list[EvalRecord]) -> tuple[list[EvalRecord], int]:
-        async with semaphore:
-            request_model_config = build_judge_model_config(model_config, len(batch))
-            task_input = build_judge_task_input(batch)
+        request_model_config = build_judge_model_config(model_config, len(batch))
+        task_input = build_judge_task_input(batch)
 
-            try:
-                completion = await client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are a strict binary grading function."},
-                        {"role": "user", "content": JUDGE_PROMPT_TEMPLATE.format(task_input, len(batch))},
-                    ],
-                    **request_model_config,
-                )
-            except Exception as exc:
-                log_status(f"Judge request failed: {type(exc).__name__}: {exc}", log_path)
-                return batch, 0
+        try:
+            completion = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a strict binary grading function."},
+                    {"role": "user", "content": JUDGE_PROMPT_TEMPLATE.format(task_input, len(batch))},
+                ],
+                **request_model_config,
+            )
+        except Exception as exc:
+            log_status(f"Judge request failed: {type(exc).__name__}: {exc}", log_path)
+            return batch, 0
 
-            content = completion.choices[0].message.content
-            if content is None:
-                log_status("Judge request returned empty content.", log_path)
-                return batch, 0
+        content = completion.choices[0].message.content
+        if content is None:
+            log_status("Judge request returned empty content.", log_path)
+            return batch, 0
 
-            lines = [line.strip() for line in content.strip().splitlines()]
-            ok = assign_judge_values(batch, lines)
-            if not ok:
-                log_status(
-                    "Judge response did not match output contract. "
-                    f"expected_lines={len(batch)} actual_lines={len(lines)}",
-                    log_path,
-                )
-                return batch, 0
+        lines = [line.strip() for line in content.strip().splitlines()]
+        ok = assign_judge_values(batch, lines)
+        if not ok:
+            log_status(
+                "Judge response did not match output contract. "
+                f"expected_lines={len(batch)} actual_lines={len(lines)}",
+                log_path,
+            )
+            return batch, 0
 
-            return [], len(batch)
+        return [], len(batch)
+
+    async def _score_batches(
+        records: list[EvalRecord],
+        pbar,
+    ) -> list[EvalRecord]:
+        batch_iterator = iter(enumerate(batched(records, batch_size)))
+        failed_batches: dict[int, list[EvalRecord]] = {}
+
+        async def _worker() -> None:
+            while True:
+                try:
+                    batch_index, batch = next(batch_iterator)
+                except StopIteration:
+                    return
+
+                failed_batch, passed_count = await _score_batch(list(batch))
+                if failed_batch:
+                    failed_batches[batch_index] = failed_batch
+                pbar.update(passed_count)
+
+        batch_count = (len(records) + batch_size - 1) // batch_size
+        workers = [
+            asyncio.create_task(_worker())
+            for _ in range(min(max_concurrency, batch_count))
+        ]
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            for worker in workers:
+                if not worker.done():
+                    worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+
+        return list(chain.from_iterable(
+            failed_batches[index]
+            for index in sorted(failed_batches)
+        ))
 
     async def _score_once(records: list[EvalRecord], repeat_index: int) -> list[float]:
         pending_records = records
@@ -165,18 +200,7 @@ async def get_judge_scores(records: list[EvalRecord], **config) -> None:
                     pbar=pbar,
                 )
 
-                tasks = [
-                    asyncio.create_task(_score_batch(list(batch)))
-                    for batch in batched(pending_records, batch_size)
-                ]
-
-                failed_records: list[EvalRecord] = []
-                for task in asyncio.as_completed(tasks):
-                    failed_batch, passed_count = await task
-                    failed_records.extend(failed_batch)
-                    pbar.update(passed_count)
-
-                pending_records = failed_records
+                pending_records = await _score_batches(pending_records, pbar)
 
                 retry_count += 1
                 delay = min(init_retry_delay * (2 ** retry_count), max_retry_delay)
@@ -191,9 +215,12 @@ async def get_judge_scores(records: list[EvalRecord], **config) -> None:
 
         return [record.score for record in records]
 
-    repeated_scores = [await _score_once(records, i) for i in range(repeats)]
-    for idx, record in enumerate(records):
-        record.score = mean(scores[idx] for scores in repeated_scores)
+    try:
+        repeated_scores = [await _score_once(records, i) for i in range(repeats)]
+        for idx, record in enumerate(records):
+            record.score = mean(scores[idx] for scores in repeated_scores)
+    finally:
+        await client.close()
 
 
 async def score_unscored_file(
@@ -629,69 +656,69 @@ async def score_pending_unscored(
         log_status(f"[score-done] {label} scored={scored_path}", log_path, worker_verbose)
         return scored_path
 
-    while True:
-        if (
-            watch
-            and stop_when_complete
-            and not active_tasks
-            and expected_paths is not None
-        ):
-            missing = missing_paths(expected_paths)
-            if not missing:
+    try:
+        while True:
+            if (
+                watch
+                and stop_when_complete
+                and not active_tasks
+                and expected_paths is not None
+            ):
+                missing = missing_paths(expected_paths)
+                if not missing:
+                    log_status(
+                        "[complete] "
+                        f"expected_scored_files={len(expected_paths)}",
+                        log_path,
+                        worker_verbose,
+                    )
+                    break
+
+            pending_paths = _find_pending_paths()
+            capacity = file_concurrency - len(active_tasks)
+            paths_to_start = pending_paths[:max(capacity, 0)]
+            for path in paths_to_start:
+                active_tasks[asyncio.create_task(_score_path(path))] = path
+
+            if paths_to_start:
+                idle_polls = 0
                 log_status(
-                    "[complete] "
-                    f"expected_scored_files={len(expected_paths)}",
+                    "[scheduled] "
+                    f"started={len(paths_to_start)} "
+                    f"active={len(active_tasks)} "
+                    f"pending_seen={len(pending_paths)}",
                     log_path,
                     worker_verbose,
                 )
-                break
 
-        pending_paths = _find_pending_paths()
-        capacity = file_concurrency - len(active_tasks)
-        paths_to_start = pending_paths[:max(capacity, 0)]
-        for path in paths_to_start:
-            active_tasks[asyncio.create_task(_score_path(path))] = path
+            if active_tasks:
+                done_tasks, _ = await asyncio.wait(
+                    active_tasks,
+                    timeout=poll_interval,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done_tasks:
+                    continue
 
-        if paths_to_start:
-            idle_polls = 0
-            log_status(
-                "[scheduled] "
-                f"started={len(paths_to_start)} "
-                f"active={len(active_tasks)} "
-                f"pending_seen={len(pending_paths)}",
-                log_path,
-                worker_verbose,
-            )
+                scored_paths: list[Path] = []
+                for task in done_tasks:
+                    source_path = active_tasks.pop(task)
+                    try:
+                        scored_path = task.result()
+                    except Exception as exc:
+                        log_status(
+                            "[score-error] "
+                            f"path={source_path} "
+                            f"error={type(exc).__name__}: {exc}",
+                            log_path,
+                            verbose=True,
+                        )
+                        raise
+                    scored_paths.append(scored_path)
 
-        if active_tasks:
-            done_tasks, _ = await asyncio.wait(
-                active_tasks,
-                timeout=poll_interval,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if not done_tasks:
+                all_scored_paths.extend(scored_paths)
                 continue
 
-            scored_paths: list[Path] = []
-            for task in done_tasks:
-                source_path = active_tasks.pop(task)
-                try:
-                    scored_path = task.result()
-                except Exception as exc:
-                    log_status(
-                        "[score-error] "
-                        f"path={source_path} "
-                        f"error={type(exc).__name__}: {exc}",
-                        log_path,
-                        verbose=True,
-                    )
-                    raise
-                scored_paths.append(scored_path)
-
-            all_scored_paths.extend(scored_paths)
-            continue
-
-        else:
             idle_polls += 1
             if idle_polls == 1 or idle_polls % 30 == 0:
                 missing_count = None
@@ -710,9 +737,13 @@ async def score_pending_unscored(
             if max_idle_polls is not None and idle_polls >= max_idle_polls:
                 break
             await asyncio.sleep(poll_interval)
-
-        if not watch:
-            break
+    finally:
+        remaining_tasks = list(active_tasks)
+        for task in remaining_tasks:
+            if not task.done():
+                task.cancel()
+        if remaining_tasks:
+            await asyncio.gather(*remaining_tasks, return_exceptions=True)
 
     log_status(
         "[worker-stop] "

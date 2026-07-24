@@ -28,12 +28,12 @@ def apply_AlphaEdit_to_model(
     tok: AutoTokenizer,
     requests: List[Dict],
     hparams,
-    copy=False,
-    return_orig_weights=False,
+    copy: bool = False,
+    return_orig_weights: bool = False,
     cache_template: Optional[str] = None,
-    keep_original_weight=False,
-    reset_cache=False,
-    **kwargs
+    keep_original_weight: bool = False,
+    reset_cache: bool = False,
+    **kwargs,
 ) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
     """
     Returns a model with the desired changes.
@@ -341,7 +341,10 @@ def upd_matrix_match_shape(matrix: torch.Tensor, shape: torch.Size) -> torch.Ten
         )
 
 
-def get_context_templates(model, tok):
+def get_context_templates(
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+) -> List[List[str]]:
     global CONTEXT_TEMPLATES_CACHE
 
     if CONTEXT_TEMPLATES_CACHE is None:
@@ -364,14 +367,14 @@ def get_context_templates(model, tok):
 
 
 def get_project(
-    model,
-    tok,
-    layer,
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+    layer: int,
     hparams,
     progress=None,
     force_recompute: bool = False,
     status_callback=None,
-):
+) -> torch.Tensor:
     if status_callback is not None:
         status_callback("covariance")
     cov = get_cov(

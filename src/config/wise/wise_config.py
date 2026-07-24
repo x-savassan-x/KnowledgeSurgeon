@@ -36,7 +36,7 @@ class WiseConfig(Config):
     sequential_edit: bool = True
     use_chat_template: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.act_margin is not None:
             if len(self.act_margin) != 3:
                 raise ValueError("WISE act_margin must contain [alpha, beta, gamma].")

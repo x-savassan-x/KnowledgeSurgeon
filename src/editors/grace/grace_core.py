@@ -1,11 +1,16 @@
 import copy
+from typing import Any
 
 import torch
 
 from .utils import brackets_to_periods, parent_module
 
 
-def perturb_values(chosen_value, num_pert, device):
+def perturb_values(
+    chosen_value: torch.Tensor,
+    num_pert: int,
+    device: torch.device | str,
+) -> torch.Tensor:
     noise = torch.normal(0, 1, chosen_value.shape, device=device)
     noise[0] = noise[0] * 0
     noise.requires_grad = True
@@ -14,7 +19,7 @@ def perturb_values(chosen_value, num_pert, device):
 
 
 class GraceCore(torch.nn.Module):
-    def __init__(self, config, model, device):
+    def __init__(self, config, model, device: torch.device | str) -> None:
         super().__init__()
         self.config = config
         self.log_dict = {}
@@ -37,30 +42,30 @@ class GraceCore(torch.nn.Module):
             setattr(edit_module, layer_name, GraceAdapter(config, original_layer).to(self.device))
             self.original_layer = copy.deepcopy(original_layer)
 
-    def __call__(self, **kwargs):
+    def __call__(self, **kwargs) -> Any:
         return self.model(**kwargs)
 
-    def reset_layer(self):
+    def reset_layer(self) -> None:
         layer_name = self.layer.rsplit(".", 1)[-1]
         edit_module = parent_module(self.model, brackets_to_periods(self.layer))
         if self.original_layer is not None:
             setattr(edit_module, layer_name, self.original_layer.to(self.device))
 
-    def set_inference_mode(self):
+    def set_inference_mode(self) -> None:
         adapter = eval(f"self.model.{self.layer}")
         setattr(adapter, "training", False)
         setattr(adapter, "key_id", -1)
         setattr(adapter, "iter", -1)
 
-    def generate(self, *args, **kwargs):
+    def generate(self, *args, **kwargs) -> Any:
         self.set_inference_mode()
         return self.model.generate(*args, **kwargs)
 
-    def rolllback(self, edit_id):
+    def rolllback(self, edit_id: int) -> None:
         layer = eval(f"self.model.{self.layer}")
         layer.delete_key(edit_id)
 
-    def edit(self, config, tokens, edit_id):
+    def edit(self, config, tokens: dict[str, torch.Tensor], edit_id: int) -> None:
         key_id = (tokens["labels"] == -100).sum() - 1
         adapter = eval(f"self.model.{self.layer}")
         setattr(adapter, "key_id", key_id)
@@ -105,7 +110,7 @@ class GraceCore(torch.nn.Module):
 
 
 class GraceAdapter(torch.nn.Module):
-    def __init__(self, config, layer):
+    def __init__(self, config, layer: torch.nn.Module) -> None:
         super().__init__()
 
         self.layer = layer
@@ -124,7 +129,12 @@ class GraceAdapter(torch.nn.Module):
         self.value_shape = layer.weight.shape[0]
         self.training = False
 
-    def add_key(self, new_key, new_value, new_edit_id):
+    def add_key(
+        self,
+        new_key: torch.Tensor,
+        new_value: torch.Tensor,
+        new_edit_id: int,
+    ) -> tuple[torch.Tensor, torch.nn.Parameter, torch.Tensor, list[torch.Tensor], list[int]]:
         keys = torch.vstack([self.keys, new_key.detach()])
         values = torch.nn.Parameter(torch.vstack([self.values, new_value]), requires_grad=True)
         new_epsilon = torch.tensor(self.init_epsilon, device=self.device).view(1)
@@ -137,7 +147,7 @@ class GraceAdapter(torch.nn.Module):
         edit_ids = self.edit_ids + [new_edit_id]
         return keys, values, epsilons, key_labels, edit_ids
 
-    def delete_key(self, edit_id):
+    def delete_key(self, edit_id: int) -> None:
         if "keys" not in self.__dict__ or self.edit_ids == []:
             return
         if edit_id in self.edit_ids:
@@ -151,21 +161,29 @@ class GraceAdapter(torch.nn.Module):
             self.key_labels = self.key_labels[:index_to_remove] + self.key_labels[index_to_remove + 1 :]
             self.edit_ids = self.edit_ids[:index_to_remove] + self.edit_ids[index_to_remove + 1 :]
 
-    def init_key_value(self, query, value):
+    def init_key_value(
+        self,
+        query: torch.Tensor,
+        value: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor], list[int]]:
         key = query.detach()
         epsilon = torch.tensor(self.init_epsilon, device=self.device, requires_grad=False).view(1)
         key_label = [self.edit_label]
         edit_ids = [self.edit_id]
         return key, value, epsilon, key_label, edit_ids
 
-    def label_match(self, edit_label, key_label):
+    def label_match(self, edit_label: torch.Tensor, key_label: torch.Tensor) -> torch.Tensor:
         return edit_label.float().mean() == key_label.float().mean()
 
-    def split_epsilons_in_half(self, nearest_key, smallest_distance):
+    def split_epsilons_in_half(
+        self,
+        nearest_key: torch.Tensor,
+        smallest_distance: torch.Tensor,
+    ) -> None:
         self.epsilons[nearest_key] = (smallest_distance / 2) - 1e-5
         self.epsilons[-1] = smallest_distance / 2
 
-    def forward(self, *args):
+    def forward(self, *args) -> Any:
         layer_out = self.layer(*args)
 
         if not self.training and "keys" not in self.__dict__:
