@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import platform
 import json
@@ -7,7 +5,6 @@ import shutil
 import socket
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -208,14 +205,10 @@ def _provider_env() -> dict[str, str]:
 
 
 def collect_hardware_info(
-    run_index: int | None = None,
     notes: str = "",
     manual: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "schema_version": 1,
-        "run_index": run_index,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
         "hostname": socket.gethostname(),
         "platform": {
             "system": platform.system(),
@@ -237,8 +230,9 @@ def collect_hardware_info(
         "gpu": _nvidia_gpu_info(),
         "torch": _torch_info(),
         "provider_env": _provider_env(),
-        "notes": notes,
     }
+    if notes:
+        payload["notes"] = notes
     if manual:
         payload["manual"] = manual
     return payload
@@ -255,7 +249,6 @@ def save_run_hardware(
     evaluation_dir: Path | str | None = None,
 ) -> Path:
     hardware = collect_hardware_info(
-        run_index=run_index,
         notes=notes,
         manual=manual,
     )
