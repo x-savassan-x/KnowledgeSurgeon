@@ -319,6 +319,9 @@ def save_hardware_results(
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
     )
+    hardware = dict(hardware)
+    for key in ("schema_version", "run_index", "captured_at"):
+        hardware.pop(key, None)
     _write_json(path, hardware)
 
     return path
