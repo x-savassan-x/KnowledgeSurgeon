@@ -77,13 +77,18 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
                 ).to(get_model_device(model))
 
                 with torch.inference_mode():
-                    output_ids = model.generate(**{
+                    generation_inputs = {
                         **inputs,
                         "pad_token_id": tokenizer.pad_token_id,
                         "eos_token_id": tokenizer.eos_token_id,
                         "repetition_penalty": 1.5,
                         **model_config,
-                    })
+                    }
+                    if getattr(model, "accepts_routing_prompts", False):
+                        generation_inputs["routing_prompts"] = [
+                            record.prompt for record in batch
+                        ]
+                    output_ids = model.generate(**generation_inputs)
 
                 prompt_length = inputs["input_ids"].shape[1]
                 generated_ids = output_ids[:, prompt_length:]
@@ -146,7 +151,10 @@ def async_generation_device_indices(
             raise RuntimeError("Async generation requires at least 2 CUDA devices")
         return []
 
-    unsafe_methods = set(async_config.get("unsafe_methods", []))
+    # MNEMO mutates both weights and an external-memory router at consolidation
+    # boundaries. Keep milestone generation synchronous until snapshot transfer is
+    # validated under concurrent editing.
+    unsafe_methods = {"mnemo"} | set(async_config.get("unsafe_methods", []))
     if editing_method in unsafe_methods:
         if log_fn is not None:
             log_fn(f"[async-generation-disabled] method={editing_method} reason=stateful_adapter")

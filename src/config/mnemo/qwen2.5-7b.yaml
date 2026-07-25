@@ -1,2 +1,97 @@
 alg_name: Mnemo
 model_config: ../base/qwen2.5-7b.yaml
+
+# AlphaEdit consolidation writer
+layers: [4, 5, 6, 7, 8]
+fact_token: subject_last
+v_num_grad_steps: 25
+v_lr: 5.0e-1
+v_loss_layer: 27
+v_weight_decay: 1.0e-3
+clamp_norm_factor: 4
+kl_factor: 0.0625
+
+layer_module_tmp: "model.layers.{}"
+rewrite_module_tmp: "model.layers.{}.mlp.down_proj"
+ln_f_module: "model.norm"
+lm_head_module: "lm_head"
+
+mom2_dataset: wikipedia
+mom2_n_samples: 100000
+mom2_dtype: float32
+stats_dir: data/assets/layer_stats
+nullspace_threshold: 2.0e-2
+L2: 1
+P_loc: data/assets/alpha_edit_projectors/qwen2.5-7b/null_space_project.pt
+
+# MNEMO external-memory cycle
+consolidation_cycle: 100
+external_only: false
+intervention_block: 18
+intervention_module_tmp: "model.layers.{}"
+
+router:
+  model_name: BAAI/bge-m3
+  device: cpu
+  fp16: false
+  max_length: 384
+  batch_size: 32
+  gate: score_margin
+  # BGE-M3 FP16, bank 1,000, repeat 0, calibrated at 1% locality FAR.
+  score_threshold: 0.622539758682251
+  margin_threshold: 0.06765425950288773
+
+delta:
+  num_steps: 50
+  learning_rate: 1.0
+  weight_decay: 0.0
+  max_norm: 10.0
+  early_stop_loss: 1.0e-3
+  target_leading_space: true
+
+safety:
+  enabled: true
+  validation_microbatch_size: 4
+  canary_prompts:
+    - "The sky above the quiet field was"
+    - "After reviewing the evidence, the committee"
+    - "To prepare a simple meal, first"
+    - "In a well-designed experiment, researchers"
+    - "During the winter, the river"
+    - "The purpose of a public library is"
+    - "When the meeting ended, everyone"
+    - "A careful explanation should"
+    - "On a clear morning, the city"
+    - "The small wooden box contained"
+    - "If the temperature continues to rise, the ice"
+    - "Before making a decision, it is useful to"
+    - "Most people learn a new skill by"
+    - "The report concluded that the results"
+    - "At the end of the journey, they"
+    - "Because the instructions were incomplete, the team"
+  canary_sample_size: 16
+  retention_reservoir_size: 256
+  retention_sample_size: 64
+  sphere_sample_size: 64
+  sphere_chunk_size: 16
+  sphere_seed: 0
+  sphere_exponent: 1.0
+  tensor_chunk_elements: 1000000
+  warning_votes_required: 2
+  relative_update_norm_warning: 0.10
+  relative_update_norm_hard_limit: 1.0
+  step_kl_warning: 0.05
+  step_kl_hard_limit: 0.20
+  cumulative_kl_warning: 0.10
+  cumulative_kl_hard_limit: 0.50
+  step_nll_warning: 0.25
+  step_nll_hard_limit: 0.75
+  cumulative_nll_warning: 0.50
+  cumulative_nll_hard_limit: 1.50
+  current_batch_min_success: 0.80
+  retention_min_success: 0.80
+  retention_max_mean_drop: 0.20
+  sphere_step_warning: 0.10
+  sphere_step_hard_limit: 0.25
+  sphere_cumulative_warning: 0.20
+  sphere_cumulative_hard_limit: 0.50

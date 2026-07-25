@@ -1,6 +1,7 @@
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -19,8 +20,151 @@ COV_CACHE = {}
 
 P = None
 P_loaded_path: Path | None = None
+cache_c: torch.Tensor | None = None
 cache_c_new = False
 cache_c_key = None
+
+
+@dataclass
+class AlphaEditCacheState:
+    matrix: torch.Tensor | None = None
+    key: tuple | None = None
+
+    def reset(self) -> None:
+        self.matrix = None
+        self.key = None
+
+
+def load_AlphaEdit_projector(hparams) -> torch.Tensor:
+    """Load the configured projector once and return its CPU tensor."""
+    global P, P_loaded_path
+
+    projector_path = Path(hparams.P_loc)
+    if not projector_path.exists():
+        raise FileNotFoundError(
+            f"AlphaEdit projector is missing: {projector_path}. "
+            "Download it with notebook/assets.ipynb before editing."
+        )
+    resolved_path = projector_path.resolve()
+    if P is None or P_loaded_path != resolved_path:
+        P = torch.load(projector_path, map_location="cpu")
+        P_loaded_path = resolved_path
+    return P
+
+
+def release_AlphaEdit_projector(projector_path: str | Path | None = None) -> bool:
+    """Release the process-wide projector when it matches the requested asset."""
+    global P, P_loaded_path
+
+    if projector_path is not None and P_loaded_path is not None:
+        if Path(projector_path).resolve() != P_loaded_path:
+            return False
+    P = None
+    P_loaded_path = None
+    return True
+
+
+def _alpha_edit_cache_key(hparams) -> tuple:
+    return (
+        hparams.model_key,
+        tuple(hparams.layers),
+        hparams.rewrite_module_tmp,
+    )
+
+
+def _resolve_cache_matrix(
+    model: AutoModelForCausalLM,
+    hparams,
+    cache_state: AlphaEditCacheState | None,
+) -> torch.Tensor:
+    global cache_c, cache_c_new, cache_c_key
+
+    current_key = _alpha_edit_cache_key(hparams)
+    if cache_state is not None:
+        if cache_state.matrix is None or cache_state.key != current_key:
+            output_weight = nethook.get_parameter(
+                model,
+                f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight",
+            )
+            input_size = output_weight.shape[1]
+            cache_state.matrix = torch.zeros(
+                (len(hparams.layers), input_size, input_size),
+                device="cpu",
+            )
+            cache_state.key = current_key
+        return cache_state.matrix
+
+    if cache_c is None or not cache_c_new or cache_c_key != current_key:
+        output_weight = nethook.get_parameter(
+            model,
+            f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight",
+        )
+        input_size = output_weight.shape[1]
+        cache_c = torch.zeros(
+            (len(hparams.layers), input_size, input_size),
+            device="cpu",
+        )
+        cache_c_new = True
+        cache_c_key = current_key
+    return cache_c
+
+
+def _validate_cache_factors(
+    cache_matrix: torch.Tensor,
+    factors: list[torch.Tensor],
+) -> list[torch.Tensor]:
+    if cache_matrix.ndim != 3 or cache_matrix.shape[1] != cache_matrix.shape[2]:
+        raise ValueError("AlphaEdit cache must contain square matrices per layer.")
+    if len(factors) != cache_matrix.shape[0]:
+        raise ValueError("AlphaEdit cache factor count does not match configured layers.")
+
+    input_size = cache_matrix.shape[1]
+    prepared_factors: list[torch.Tensor] = []
+    for layer_index, factor in enumerate(factors):
+        if factor.ndim != 2 or factor.shape[0] != input_size:
+            raise ValueError(
+                "AlphaEdit cache factor has the wrong shape at layer index "
+                f"{layer_index}: expected ({input_size}, n), got {tuple(factor.shape)}."
+            )
+        prepared = factor.detach().to(device="cpu", dtype=torch.float32)
+        if not torch.isfinite(prepared).all():
+            raise ValueError(
+                f"AlphaEdit cache factor contains non-finite values at layer index {layer_index}."
+            )
+        prepared_factors.append(prepared)
+    return prepared_factors
+
+
+def _commit_cache_factors(
+    cache_matrix: torch.Tensor,
+    factors: list[torch.Tensor],
+) -> None:
+    prepared_factors = _validate_cache_factors(cache_matrix, factors)
+    for layer_index, factor in enumerate(prepared_factors):
+        cache_matrix[layer_index].addmm_(factor, factor.T)
+
+
+def commit_AlphaEdit_cache_factors(
+    cache_state: AlphaEditCacheState,
+    factors: list[torch.Tensor],
+) -> None:
+    if cache_state.matrix is None:
+        raise RuntimeError("AlphaEdit cache is not initialized.")
+    _commit_cache_factors(cache_state.matrix, factors)
+
+
+def restore_AlphaEdit_weights(
+    model: AutoModelForCausalLM,
+    weights: dict[str, torch.Tensor],
+) -> None:
+    """Restore only the parameters changed by an AlphaEdit proposal."""
+    params = dict(model.named_parameters())
+    missing = sorted(set(weights).difference(params))
+    if missing:
+        raise KeyError(f"AlphaEdit restore weights are missing from the model: {missing}")
+    with torch.no_grad():
+        for name, value in weights.items():
+            copy_to_param(params[name], value)
 
 
 def apply_AlphaEdit_to_model(
@@ -33,65 +177,94 @@ def apply_AlphaEdit_to_model(
     cache_template: Optional[str] = None,
     keep_original_weight: bool = False,
     reset_cache: bool = False,
+    cache_state: AlphaEditCacheState | None = None,
+    defer_cache_commit: bool = False,
+    return_cache_factors: bool = False,
+    orig_weights_device: torch.device | str = "cpu",
     **kwargs,
-) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
+) -> (
+    tuple[AutoModelForCausalLM, dict[str, torch.Tensor]]
+    | tuple[
+        AutoModelForCausalLM,
+        dict[str, torch.Tensor],
+        list[torch.Tensor],
+    ]
+):
     """
-    Returns a model with the desired changes.
-    :param copy: If true, will preserve the original model while creating a new one to edit.
-        Note that you are responsible for deallocating the new model's memory to avoid leaks.
-    :param reset_cache: If true, will reset cache_c_new to False, forcing re-initialization of cache_c.
-    :return: (1) the updated model, (2) an original copy of the weights that changed
+    Apply an AlphaEdit update and optionally defer its cumulative-cache commit.
+
+    When ``defer_cache_commit`` is true, the model receives the candidate update
+    while the supplied cache state remains unchanged. Set
+    ``return_cache_factors`` to receive the compact factors required by
+    :func:`commit_AlphaEdit_cache_factors` after external validation. Original
+    changed weights are copied to CPU by default for exact rollback without
+    retaining a second copy on the GPU.
     """
 
-    global P, P_loaded_path, cache_c, cache_c_new, cache_c_key
+    global cache_c, cache_c_key, cache_c_new
+
+    if return_cache_factors and not defer_cache_commit:
+        raise ValueError("return_cache_factors requires defer_cache_commit=True.")
 
     # Reset cache if requested
     if reset_cache:
-        cache_c_new = False
+        if cache_state is None:
+            cache_c = None
+            cache_c_new = False
+            cache_c_key = None
+        else:
+            cache_state.reset()
 
     weights_copy = {}
     if copy:
         model = deepcopy(model)
 
-    p_loc = Path(hparams.P_loc)
-    if not p_loc.exists():
-        raise FileNotFoundError(
-            f"AlphaEdit projector is missing: {p_loc}. "
-            "Download it with notebook/assets.ipynb before editing."
-        )
+    load_AlphaEdit_projector(hparams)
 
-    resolved_p_loc = p_loc.resolve()
-    if P_loaded_path != resolved_p_loc:
-        P = torch.load(p_loc, map_location="cpu")
-        P_loaded_path = resolved_p_loc
-
-    current_cache_key = (
-        hparams.model_key,
-        tuple(hparams.layers),
-        hparams.rewrite_module_tmp,
+    cache_matrix = _resolve_cache_matrix(model, hparams, cache_state)
+    # Always defer the cache mutation until all model updates have been applied.
+    # Transactional callers receive the factors and commit them after validation.
+    deltas, cache_factors = execute_AlphaEdit(
+        model,
+        tok,
+        requests,
+        hparams,
+        cache_template=cache_template,
+        cache_matrix=cache_matrix,
+        defer_cache_commit=True,
     )
-    if not cache_c_new or cache_c_key != current_cache_key:
-        W_out = nethook.get_parameter(model, f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight")
-        input_size = W_out.shape[1]
-        cache_c = torch.zeros((len(hparams.layers), input_size, input_size), device="cpu")
-        del W_out
-        cache_c_new = True
-        cache_c_key = current_cache_key
 
-    deltas = execute_AlphaEdit(model, tok, requests, hparams, cache_template=cache_template)
+    prepared_updates: list[tuple[str, torch.nn.Parameter, torch.Tensor]] = []
+    for weight_name, update in deltas.items():
+        weight = nethook.get_parameter(model, weight_name)
+        update = upd_matrix_match_shape(update, weight.shape)
+        if not torch.isfinite(update).all():
+            raise ValueError(f"AlphaEdit produced a non-finite update for {weight_name}.")
+        prepared_updates.append((weight_name, weight, update))
 
-    with torch.no_grad():
-        for w_name, upd_m in deltas.items():
-            w = nethook.get_parameter(model, w_name)
-            upd_matrix = to_param_device(upd_m, w)
-            upd_matrix = upd_matrix_match_shape(upd_matrix, w.shape)
+        if return_orig_weights:
+            weights_copy[weight_name] = weight.detach().to(
+                device=orig_weights_device,
+                copy=True,
+            )
 
-            if return_orig_weights and w_name not in weights_copy:
-                weights_copy[w_name] = w.detach().clone()
-            w[...] += upd_matrix.to(device=w.device, dtype=w.dtype)
+    try:
+        with torch.no_grad():
+            for _, weight, update in prepared_updates:
+                update = to_param_device(update, weight, dtype=weight.dtype)
+                weight.add_(update)
+
+        if not defer_cache_commit:
+            _commit_cache_factors(cache_matrix, cache_factors)
+    except Exception:
+        if weights_copy:
+            restore_AlphaEdit_weights(model, weights_copy)
+        raise
 
     # print(f"New weights successfully inserted into {list(deltas.keys())}")
 
+    if defer_cache_commit and return_cache_factors:
+        return model, weights_copy, cache_factors
     return model, weights_copy
 
 
@@ -101,13 +274,22 @@ def execute_AlphaEdit(
     requests: List[Dict],
     hparams,
     cache_template: Optional[str] = None,
-) -> Dict[str, torch.Tensor]:
+    cache_matrix: torch.Tensor | None = None,
+    defer_cache_commit: bool = False,
+) -> (
+    dict[str, torch.Tensor]
+    | tuple[dict[str, torch.Tensor], list[torch.Tensor]]
+):
     """
     Executes the AlphaEdit update algorithm for the specified update at the specified layer
     Invariant: model at beginning of function == model at end of function
     """
 
+    if cache_matrix is None:
+        cache_matrix = _resolve_cache_matrix(model, hparams, None)
+
     deltas = {}
+    cache_factors: list[torch.Tensor] = []
 
     # Update target and print info
     requests = deepcopy(requests)
@@ -135,145 +317,139 @@ def execute_AlphaEdit(
     }
 
     # Save old weights for future restoration
-    weights_copy = {k: v.detach().clone() for k, v in weights.items()}
+    weights_copy = {
+        name: weight.detach().to(device="cpu", copy=True)
+        for name, weight in weights.items()
+    }
 
-    # Compute z for final layer
-    context_templates = get_context_templates(model, tok)
-    z_layer = hparams.layers[-1]
-    z_device = get_module_device(
-        model,
-        hparams.layer_module_tmp.format(z_layer),
-        fallback=hparams.device,
-    )
-    z_list = []
-
-    for request in requests:
-        # Retrieve k/v pair if already stored in cache
-        cache_fname = (
-            Path(
-                str(cache_template).format(
-                    z_layer, hparams.clamp_norm_factor, request["case_id"]
-                )
-            )
-            if cache_template is not None
-            else None
-        )
-        data_loaded = False
-        if (
-            cache_fname is not None  # Require cache template
-            and cache_fname.exists()  # Cache file must exist
-        ):
-            try:
-                data = np.load(cache_fname)
-                z_list.append(torch.from_numpy(data["v_star"]).to(z_device))
-                data_loaded = True
-            except Exception:
-                pass
-
-        # Compute k/v pair if not loaded from cache
-        if not data_loaded:
-            cur_z = compute_z(
-                model,
-                tok,
-                request,
-                hparams,
-                z_layer,
-                context_templates,
-            )
-
-            z_list.append(cur_z)
-
-            if cache_fname is not None:
-                cache_fname.parent.mkdir(exist_ok=True, parents=True)
-                np.savez(
-                    cache_fname,
-                    **{
-                        "v_star": cur_z.detach().cpu().numpy(),
-                    },
-                )
-                # print(f"Cached k/v pair at {cache_fname}")
-    zs = torch.stack(z_list, dim=1)
-
-    # Insert
-    for i, layer in enumerate(hparams.layers):
-        # print(f"\n\nLAYER {layer}\n")
-
-        # Get current model activations
-        layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
-        layer_device = get_module_device(
+    try:
+        # Compute z for final layer
+        context_templates = get_context_templates(model, tok)
+        z_layer = hparams.layers[-1]
+        z_device = get_module_device(
             model,
-            hparams.rewrite_module_tmp.format(layer),
+            hparams.layer_module_tmp.format(z_layer),
             fallback=hparams.device,
         )
-        # print(f"Writing {layer_ks.size(1)} key/value pair(s) into layer {layer}")
+        z_list = []
 
-        # Compute residual error
-        cur_zs = get_module_input_output_at_words(
-            model,
-            tok,
-            z_layer,
-            context_templates=[request["prompt"] for request in requests],
-            words=[request["subject"] for request in requests],
-            module_template=hparams.layer_module_tmp,
-            fact_token_strategy=hparams.fact_token,
-        )[1].T
-        targets = zs.to(cur_zs.device) - cur_zs
-        # print("z error", torch.linalg.norm(targets, dim=0).mean())
-
-        repeat_factor = (layer_ks.size(1) // targets.size(1))
-        targets = targets.repeat_interleave(repeat_factor, dim=1)
-        layer_ks = layer_ks.float()
-        targets = targets.float()
-        resid = targets / (len(hparams.layers) - i)  # Distribute residual across layers
-        upd_matrix = torch.linalg.solve(
-            P[i, :, :].to(device=layer_device, dtype=torch.float32)
-            @ (
-                layer_ks.to(device=layer_device, dtype=torch.float32)
-                @ layer_ks.T.to(device=layer_device, dtype=torch.float32)
-                + cache_c[i, :, :].to(device=layer_device, dtype=torch.float32)
+        for request in requests:
+            # Retrieve k/v pair if already stored in cache.
+            cache_fname = (
+                Path(
+                    str(cache_template).format(
+                        z_layer, hparams.clamp_norm_factor, request["case_id"]
+                    )
+                )
+                if cache_template is not None
+                else None
             )
-            + hparams.L2 * torch.eye(layer_ks.shape[0], dtype=torch.float32, device=layer_device),
-            P[i, :, :].to(device=layer_device, dtype=torch.float32)
-            @ layer_ks.to(device=layer_device, dtype=torch.float32)
-            @ resid.T.to(device=layer_device, dtype=torch.float32)
-        )
+            data_loaded = False
+            if cache_fname is not None and cache_fname.exists():
+                try:
+                    data = np.load(cache_fname)
+                    z_list.append(torch.from_numpy(data["v_star"]).to(z_device))
+                    data_loaded = True
+                except Exception:
+                    pass
 
-        # Adjust update matrix shape
-        weight_name = f"{hparams.rewrite_module_tmp.format(layer)}.weight"
-        upd_matrix = upd_matrix_match_shape(upd_matrix, weights[weight_name].shape)
+            # Compute k/v pair if not loaded from cache.
+            if not data_loaded:
+                cur_z = compute_z(
+                    model,
+                    tok,
+                    request,
+                    hparams,
+                    z_layer,
+                    context_templates,
+                )
+                z_list.append(cur_z)
 
-        # print("orig norm", torch.linalg.norm(weights[weight_name]))
-        # print("upd norm", torch.linalg.norm(upd_matrix))
+                if cache_fname is not None:
+                    cache_fname.parent.mkdir(exist_ok=True, parents=True)
+                    np.savez(
+                        cache_fname,
+                        **{"v_star": cur_z.detach().cpu().numpy()},
+                    )
+        zs = torch.stack(z_list, dim=1)
 
-        # Update model weights and record desired changes in `delta` variable
+        # Insert
+        for i, layer in enumerate(hparams.layers):
+            # Get current model activations.
+            layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
+            layer_device = get_module_device(
+                model,
+                hparams.rewrite_module_tmp.format(layer),
+                fallback=hparams.device,
+            )
+            # Compute residual error.
+            cur_zs = get_module_input_output_at_words(
+                model,
+                tok,
+                z_layer,
+                context_templates=[request["prompt"] for request in requests],
+                words=[request["subject"] for request in requests],
+                module_template=hparams.layer_module_tmp,
+                fact_token_strategy=hparams.fact_token,
+            )[1].T
+            targets = zs.to(cur_zs.device) - cur_zs
+            repeat_factor = layer_ks.size(1) // targets.size(1)
+            targets = targets.repeat_interleave(repeat_factor, dim=1).float()
+            layer_ks = layer_ks.float()
+            resid = targets / (len(hparams.layers) - i)
+            projector = P[i].to(device=layer_device, dtype=torch.float32)
+            layer_keys = layer_ks.to(device=layer_device, dtype=torch.float32)
+            system = projector @ (
+                layer_keys @ layer_keys.T
+                + cache_matrix[i].to(device=layer_device, dtype=torch.float32)
+            )
+            system += hparams.L2 * torch.eye(
+                layer_ks.shape[0],
+                dtype=torch.float32,
+                device=layer_device,
+            )
+            rhs = projector @ layer_keys @ resid.T.to(
+                device=layer_device,
+                dtype=torch.float32,
+            )
+            upd_matrix = torch.linalg.solve(system, rhs)
+
+            # Adjust update matrix shape.
+            weight_name = f"{hparams.rewrite_module_tmp.format(layer)}.weight"
+            upd_matrix = upd_matrix_match_shape(upd_matrix, weights[weight_name].shape)
+
+            # Apply the layer update temporarily so later layers see the candidate.
+            with torch.no_grad():
+                deltas[weight_name] = upd_matrix.detach().cpu()
+                weights[weight_name].add_(upd_matrix)
+
+            # Release solve intermediates before processing the next layer.
+            del layer_ks, layer_keys, cur_zs, targets, resid
+            del projector, system, rhs, upd_matrix
+            torch.cuda.empty_cache()
+
+        for i, layer in enumerate(hparams.layers):
+            layer_ks = compute_ks(
+                model,
+                tok,
+                requests,
+                hparams,
+                layer,
+                context_templates,
+            ).T.float().cpu()
+            cache_factors.append(layer_ks)
+
+        if not defer_cache_commit:
+            _commit_cache_factors(cache_matrix, cache_factors)
+    finally:
         with torch.no_grad():
-            updated_weight = weights[weight_name].to(
-                device=upd_matrix.device,
-                dtype=upd_matrix.dtype,
-            ) + upd_matrix
-            copy_to_param(weights[weight_name], updated_weight)
-            deltas[weight_name] = (
-                upd_matrix.detach().cpu()
-            )
-
-        # Clear GPU memory
-        for x in [layer_ks, cur_zs, targets]:
-            x.cpu()
-            del x
-        torch.cuda.empty_cache()
-
-    for i, layer in enumerate(hparams.layers):
-        layer_ks = compute_ks(model, tok, requests, hparams, layer, context_templates).T
-        layer_ks = layer_ks.float()
-        cache_c[i, :, :] += layer_ks.cpu() @ layer_ks.cpu().T
-
-    # Restore state of original model
-    with torch.no_grad():
-        for k, v in weights.items():
-            copy_to_param(v, weights_copy[k])
+            for name, weight in weights.items():
+                copy_to_param(weight, weights_copy[name])
 
     # print(f"Deltas successfully computed for {list(weights.keys())}")
 
+    if defer_cache_commit:
+        return deltas, cache_factors
     return deltas
 
 
