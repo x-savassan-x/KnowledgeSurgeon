@@ -23,20 +23,20 @@ class RoutingDecision:
 @dataclass(frozen=True)
 class ExternalMemoryState:
     keys: torch.Tensor
-    deltas: torch.Tensor
+    values: torch.Tensor
     metadata: list[object]
     score_threshold: float
     margin_threshold: float
 
 
 class ExternalMemoryBank:
-    """CPU-backed key/delta bank with deterministic score-and-margin routing."""
+    """CPU-backed key/value bank with deterministic score-and-margin routing."""
 
     def __init__(self, score_threshold: float, margin_threshold: float) -> None:
         self.score_threshold = float(score_threshold)
         self.margin_threshold = float(margin_threshold)
         self._keys = torch.empty((0, 0), dtype=torch.float32, device="cpu")
-        self._deltas = torch.empty((0, 0), dtype=torch.float32, device="cpu")
+        self._values = torch.empty((0, 0), dtype=torch.float32, device="cpu")
         self._metadata: list[object] = []
 
     def __len__(self) -> int:
@@ -47,8 +47,8 @@ class ExternalMemoryBank:
         return self._keys
 
     @property
-    def deltas(self) -> torch.Tensor:
-        return self._deltas
+    def values(self) -> torch.Tensor:
+        return self._values
 
     @property
     def metadata(self) -> list[object]:
@@ -57,7 +57,7 @@ class ExternalMemoryBank:
     def add(
         self,
         key: torch.Tensor | np.ndarray,
-        delta: torch.Tensor,
+        value: torch.Tensor,
         metadata: object = None,
     ) -> int:
         normalized_key = _cpu_float_matrix(key)
@@ -67,38 +67,38 @@ class ExternalMemoryBank:
         if normalized_key.shape[0] != 1:
             raise ValueError("ExternalMemoryBank.add expects one key")
 
-        delta_row = delta.detach().to(device="cpu")
-        if delta_row.ndim == 1:
-            delta_row = delta_row.unsqueeze(0)
-        if delta_row.ndim != 2 or delta_row.shape[0] != 1:
-            raise ValueError("ExternalMemoryBank.add expects one delta")
+        value_row = value.detach().to(device="cpu")
+        if value_row.ndim == 1:
+            value_row = value_row.unsqueeze(0)
+        if value_row.ndim != 2 or value_row.shape[0] != 1:
+            raise ValueError("ExternalMemoryBank.add expects one value")
 
         if len(self):
             if normalized_key.shape[1] != self._keys.shape[1]:
                 raise ValueError("Key embedding dimension changed")
-            if delta_row.shape[1] != self._deltas.shape[1]:
-                raise ValueError("Delta hidden dimension changed")
-            delta_row = delta_row.to(dtype=self._deltas.dtype)
+            if value_row.shape[1] != self._values.shape[1]:
+                raise ValueError("Value hidden dimension changed")
+            value_row = value_row.to(dtype=self._values.dtype)
             self._keys = torch.cat((self._keys, normalized_key), dim=0)
-            self._deltas = torch.cat((self._deltas, delta_row), dim=0)
+            self._values = torch.cat((self._values, value_row), dim=0)
         else:
             self._keys = normalized_key.clone()
-            self._deltas = delta_row.clone()
+            self._values = value_row.clone()
         self._metadata.append(copy.deepcopy(metadata))
         return len(self) - 1
 
     def clear(self) -> None:
         key_dimension = self._keys.shape[1] if self._keys.ndim == 2 else 0
-        delta_dimension = self._deltas.shape[1] if self._deltas.ndim == 2 else 0
-        delta_dtype = self._deltas.dtype
+        value_dimension = self._values.shape[1] if self._values.ndim == 2 else 0
+        value_dtype = self._values.dtype
         self._keys = torch.empty((0, key_dimension), dtype=torch.float32, device="cpu")
-        self._deltas = torch.empty((0, delta_dimension), dtype=delta_dtype, device="cpu")
+        self._values = torch.empty((0, value_dimension), dtype=value_dtype, device="cpu")
         self._metadata.clear()
 
     def copy_state(self) -> ExternalMemoryState:
         return ExternalMemoryState(
             keys=self._keys.clone(),
-            deltas=self._deltas.clone(),
+            values=self._values.clone(),
             metadata=copy.deepcopy(self._metadata),
             score_threshold=self.score_threshold,
             margin_threshold=self.margin_threshold,
@@ -106,16 +106,20 @@ class ExternalMemoryBank:
 
     def load_state(self, state: ExternalMemoryState) -> None:
         keys = _normalize_rows(_cpu_float_matrix(state.keys))
-        deltas = state.deltas.detach().to(device="cpu")
-        if keys.ndim != 2 or deltas.ndim != 2 or len(keys) != len(deltas):
-            raise ValueError("External memory keys and deltas must be aligned matrices")
+        values = state.values.detach().to(device="cpu")
+        if keys.ndim != 2 or values.ndim != 2 or len(keys) != len(values):
+            raise ValueError("External memory keys and values must be aligned matrices")
         if len(state.metadata) != len(keys):
             raise ValueError("External memory metadata must align with keys")
         self._keys = keys.clone()
-        self._deltas = deltas.clone()
+        self._values = values.clone()
         self._metadata = copy.deepcopy(state.metadata)
         self.score_threshold = float(state.score_threshold)
         self.margin_threshold = float(state.margin_threshold)
+
+    def set_thresholds(self, score_threshold: float, margin_threshold: float) -> None:
+        self.score_threshold = float(score_threshold)
+        self.margin_threshold = float(margin_threshold)
 
     def route(self, query_keys: torch.Tensor | np.ndarray) -> RoutingDecision:
         queries = _cpu_float_matrix(query_keys)
@@ -175,6 +179,13 @@ class BgeM3Router:
     def clear(self) -> None:
         dimension = self._keys.shape[1] if self._keys.ndim == 2 else 0
         self._keys = torch.empty((0, dimension), dtype=torch.float32, device="cpu")
+
+    def load(self) -> None:
+        self._get_embedder()
+
+    def set_thresholds(self, score_threshold: float, margin_threshold: float) -> None:
+        self.score_threshold = float(score_threshold)
+        self.margin_threshold = float(margin_threshold)
 
     def encode(self, prompts: list[str]) -> torch.Tensor:
         if not prompts:

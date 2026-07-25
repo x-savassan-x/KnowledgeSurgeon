@@ -5,31 +5,81 @@ from ..alpha_edit import AlphaEditConfig
 
 
 @dataclass
+class MnemoRouterThresholdConfig:
+    score_threshold: float
+    margin_threshold: float
+
+    def __post_init__(self) -> None:
+        if not -1.0 <= self.score_threshold <= 1.0:
+            raise ValueError("Mnemo router score_threshold must be in [-1, 1].")
+        if not 0.0 <= self.margin_threshold <= 2.0:
+            raise ValueError("Mnemo router margin_threshold must be in [0, 2].")
+
+
+def _default_hybrid_thresholds() -> dict[str, float]:
+    return {
+        "score_threshold": 0.5810490846633911,
+        "margin_threshold": 0.06471586972475052,
+    }
+
+
+def _default_external_only_thresholds() -> dict[str, float]:
+    return {
+        "score_threshold": 0.6538538336753845,
+        "margin_threshold": 0.09644604474306107,
+    }
+
+
+@dataclass
 class MnemoRouterConfig:
     model_name: str = "BAAI/bge-m3"
-    device: str = "cpu"
-    fp16: bool = False
+    device: str = "auto"
+    fp16: bool = True
+    eager_load: bool = True
     max_length: int = 384
     batch_size: int = 32
     gate: str = "score_margin"
-    score_threshold: float = 0.622539758682251
-    margin_threshold: float = 0.06765425950288773
+    hybrid: dict[str, float] | MnemoRouterThresholdConfig = field(
+        default_factory=_default_hybrid_thresholds
+    )
+    external_only: dict[str, float] | MnemoRouterThresholdConfig = field(
+        default_factory=_default_external_only_thresholds
+    )
+
+    hybrid_config: MnemoRouterThresholdConfig = field(init=False)
+    external_only_config: MnemoRouterThresholdConfig = field(init=False)
 
     def __post_init__(self) -> None:
         if not self.model_name:
             raise ValueError("Mnemo router model_name must not be empty.")
+        if not self.device:
+            raise ValueError("Mnemo router device must not be empty.")
+        if not isinstance(self.fp16, bool):
+            raise TypeError("Mnemo router fp16 must be a boolean.")
+        if not isinstance(self.eager_load, bool):
+            raise TypeError("Mnemo router eager_load must be a boolean.")
         if self.max_length <= 0:
             raise ValueError("Mnemo router max_length must be positive.")
         if self.batch_size <= 0:
             raise ValueError("Mnemo router batch_size must be positive.")
         if self.gate != "score_margin":
             raise ValueError("Mnemo currently supports only the score_margin router gate.")
-        if not -1.0 <= self.score_threshold <= 1.0:
-            raise ValueError("Mnemo router score_threshold must be in [-1, 1].")
-        if not 0.0 <= self.margin_threshold <= 2.0:
-            raise ValueError("Mnemo router margin_threshold must be in [0, 2].")
-        if self.device == "cpu" and self.fp16:
-            raise ValueError("Mnemo router fp16 is not supported on CPU.")
+        self.hybrid_config = self._coerce_thresholds(self.hybrid)
+        self.external_only_config = self._coerce_thresholds(self.external_only)
+
+    @staticmethod
+    def _coerce_thresholds(
+        config: dict[str, float] | MnemoRouterThresholdConfig,
+    ) -> MnemoRouterThresholdConfig:
+        if isinstance(config, MnemoRouterThresholdConfig):
+            return config
+        if not isinstance(config, dict):
+            raise TypeError("Mnemo router thresholds must be a mapping.")
+        return MnemoRouterThresholdConfig(**config)
+
+    def thresholds_for(self, external_only: bool) -> tuple[float, float]:
+        config = self.external_only_config if external_only else self.hybrid_config
+        return config.score_threshold, config.margin_threshold
 
 
 @dataclass
@@ -37,7 +87,7 @@ class MnemoDeltaConfig:
     num_steps: int = 50
     learning_rate: float = 1.0
     weight_decay: float = 0.0
-    max_norm: float = 10.0
+    max_norm: float = 40.0
     early_stop_loss: float = 1.0e-3
     target_leading_space: bool = True
 
@@ -78,6 +128,7 @@ def _default_canary_prompts() -> list[str]:
 @dataclass
 class MnemoSafetyConfig:
     enabled: bool = True
+    start_after_edits: int = 500
     validation_microbatch_size: int = 4
     canary_prompts: list[str] = field(default_factory=_default_canary_prompts)
     canary_sample_size: int = 16
@@ -133,6 +184,8 @@ class MnemoSafetyConfig:
         for name in positive_integer_fields:
             if int(getattr(self, name)) <= 0:
                 raise ValueError(f"Mnemo safety {name} must be positive.")
+        if self.start_after_edits < 0:
+            raise ValueError("Mnemo safety start_after_edits must be nonnegative.")
         self.canary_sample_size = min(
             self.canary_sample_size,
             len(self.canary_prompts),
@@ -197,6 +250,7 @@ class MnemoConfig(AlphaEditConfig):
     diagnostics: bool = False
     intervention_block: int = 18
     intervention_module_tmp: str = "model.layers.{}"
+    intervention_strength: float = 1.0
     router: dict[str, Any] | MnemoRouterConfig = field(default_factory=dict)
     delta: dict[str, Any] | MnemoDeltaConfig = field(default_factory=dict)
     safety: dict[str, Any] | MnemoSafetyConfig = field(default_factory=dict)
@@ -217,6 +271,8 @@ class MnemoConfig(AlphaEditConfig):
             raise ValueError("Mnemo intervention_block must be nonnegative.")
         if "{}" not in self.intervention_module_tmp:
             raise ValueError("Mnemo intervention_module_tmp must contain '{}'.")
+        if not 0.0 < self.intervention_strength <= 1.0:
+            raise ValueError("Mnemo intervention_strength must be in (0, 1].")
         self.router_config = self._coerce_router_config(self.router)
         self.delta_config = self._coerce_delta_config(self.delta)
         self.safety_config = self._coerce_safety_config(self.safety)

@@ -12,12 +12,13 @@ from ...utils.devices import get_model_device, get_module_device
 from ..editor import Editor
 from ..editor_utils import EditRequest
 from .consolidation import AlphaEditProposal, AlphaEditWriter
-from .interceptor import DecoderBlockDeltaInterceptor, PrefillRoutingModel
+from .interceptor import DecoderBlockInterceptor, PrefillRoutingModel
 from .router import BgeM3Router, ExternalMemoryBank
 from .safety import (
     BehavioralDriftResult,
     CanaryLogitBatch,
     ConsolidationSafetyResult,
+    NumericalGuardResult,
     SphereDriftResult,
     assess_consolidation_safety,
     check_numerical_guard,
@@ -53,18 +54,28 @@ class Mnemo(Editor):
         self._freeze_base_model()
 
         router_config = config.router_config
+        router_device = router_config.device
+        if router_device == "auto":
+            router_device = (
+                f"cuda:{config.gpu_id}" if torch.cuda.is_available() else "cpu"
+            )
+        score_threshold, margin_threshold = router_config.thresholds_for(
+            config.external_only
+        )
         self.router = BgeM3Router(
-            score_threshold=router_config.score_threshold,
-            margin_threshold=router_config.margin_threshold,
+            score_threshold=score_threshold,
+            margin_threshold=margin_threshold,
             model_name=router_config.model_name,
-            device=router_config.device,
+            device=router_device,
             use_fp16=router_config.fp16,
             max_length=router_config.max_length,
             batch_size=router_config.batch_size,
         )
+        if router_config.eager_load:
+            self.router.load()
         self.memory = ExternalMemoryBank(
-            score_threshold=router_config.score_threshold,
-            margin_threshold=router_config.margin_threshold,
+            score_threshold=score_threshold,
+            margin_threshold=margin_threshold,
         )
         self.writer = (
             None
@@ -72,12 +83,13 @@ class Mnemo(Editor):
             else AlphaEditWriter(self._base_model, self.tokenizer, config)
         )
 
-        self._interceptor: DecoderBlockDeltaInterceptor | None = None
+        self._interceptor: DecoderBlockInterceptor | None = None
         self._pending_requests: list[EditRequest] = []
         self._retention_reservoir: list[EditRequest] = []
         self._retention_seen = 0
         self._reservoir_rng = random.Random(0)
         self._consolidation_count = 0
+        self._consolidated_edit_count = 0
         self._external_only = config.external_only
         self._closed = True
         self._original_canary_logits: torch.Tensor | None = None
@@ -88,6 +100,9 @@ class Mnemo(Editor):
         self.last_consolidation_report: dict | None = None
         self.consolidation_history: list[dict] = []
         self._install_runtime()
+        if self.config.safety_config.enabled and not self._external_only:
+            # Preserve the pretrained reference before deferred consolidations begin.
+            self._ensure_original_canaries()
 
     @property
     def buffer_size(self) -> int:
@@ -104,12 +119,12 @@ class Mnemo(Editor):
     def edit(self, request: EditRequest) -> None:
         self._install_runtime()
         key = self.router.encode([request.prompt])
-        delta, loss = self._train_delta(request)
-        memory_index = self.memory.add(key, delta, metadata=request)
+        value, delta_norm, loss = self._train_value(request)
+        memory_index = self.memory.add(key, value, metadata=request)
         if not self._external_only:
             self._pending_requests.append(request)
         self.last_delta_loss = loss
-        self.last_delta_norm = float(torch.linalg.vector_norm(delta.float()))
+        self.last_delta_norm = delta_norm
         max_norm = self.config.delta_config.max_norm
         self.last_delta_saturated = self.last_delta_norm >= max_norm * (1.0 - 1.0e-4)
         if self.config.diagnostics:
@@ -150,18 +165,40 @@ class Mnemo(Editor):
             self._enter_external_only("proposal_error", error=error)
             return False
 
-        if not self.config.safety_config.enabled:
+        numerical = self._proposal_numerical_guard(proposal)
+        if not numerical.safe:
+            proposal.rollback()
+            self._enter_external_only(
+                "numerical",
+                metrics={
+                    "maximum_relative_update_norm": (
+                        numerical.maximum_relative_update_norm
+                    )
+                },
+            )
+            return False
+
+        safety_config = self.config.safety_config
+        if not safety_config.enabled:
+            safe = self._commit_without_full_safety(
+                proposal,
+                requests,
+                safety_status="disabled",
+            )
+        elif self._consolidated_edit_count < safety_config.start_after_edits:
             try:
-                proposal.apply()
-                proposal.commit()
+                self._ensure_original_canaries()
             except Exception as error:
                 proposal.rollback()
-                self._enter_external_only("commit_error", error=error)
+                self._enter_external_only("validation_error", error=error)
                 return False
-            self._finish_safe_consolidation(requests, None)
-            return True
-
-        safe = self._validate_and_finish(proposal, requests)
+            safe = self._commit_without_full_safety(
+                proposal,
+                requests,
+                safety_status="deferred",
+            )
+        else:
+            safe = self._validate_and_finish(proposal, requests, numerical)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return safe
@@ -176,7 +213,9 @@ class Mnemo(Editor):
         self._retention_seen = 0
         self._reservoir_rng.seed(0)
         self._consolidation_count = 0
+        self._consolidated_edit_count = 0
         self._external_only = self.config.external_only
+        self._set_routing_mode(self._external_only)
         self._original_canary_logits = None
         self._canary_target_ids = None
         self.last_delta_loss = None
@@ -201,6 +240,7 @@ class Mnemo(Editor):
         target._base_model.load_state_dict(self._base_model.state_dict(), strict=True)
         target.memory.load_state(self.memory.copy_state())
         target._external_only = self._external_only
+        target._set_routing_mode(target._external_only)
         target._interceptor_or_raise().disarm()
         target.model.eval()
 
@@ -225,7 +265,7 @@ class Mnemo(Editor):
             self.config.intervention_block
         )
         block = nethook.get_module(self._base_model, block_name)
-        self._interceptor = DecoderBlockDeltaInterceptor(block)
+        self._interceptor = DecoderBlockInterceptor(block)
         self.model = PrefillRoutingModel(
             self._base_model,
             self.tokenizer,
@@ -233,6 +273,7 @@ class Mnemo(Editor):
             self._interceptor,
             memory=self.memory,
             diagnostics=self.config.diagnostics,
+            intervention_strength=self.config.intervention_strength,
         )
         self._closed = False
 
@@ -240,7 +281,7 @@ class Mnemo(Editor):
         for parameter in self._base_model.parameters():
             parameter.requires_grad_(False)
 
-    def _interceptor_or_raise(self) -> DecoderBlockDeltaInterceptor:
+    def _interceptor_or_raise(self) -> DecoderBlockInterceptor:
         if self._interceptor is None:
             raise RuntimeError("MNEMO interceptor is not installed.")
         return self._interceptor
@@ -250,7 +291,10 @@ class Mnemo(Editor):
             raise RuntimeError("External-only MNEMO has no consolidation writer.")
         return self.writer
 
-    def _train_delta(self, request: EditRequest) -> tuple[torch.Tensor, float]:
+    def _train_value(
+        self,
+        request: EditRequest,
+    ) -> tuple[torch.Tensor, float, float]:
         prompt_ids, target_ids = self._request_token_ids(request)
         input_ids = torch.tensor(
             [prompt_ids + target_ids],
@@ -265,6 +309,11 @@ class Mnemo(Editor):
             device=self.device,
         )
 
+        baseline = self._intervention_state(
+            input_ids,
+            attention_mask,
+            len(prompt_ids) - 1,
+        ).float()
         hidden_size = self._hidden_size()
         delta = torch.nn.Parameter(
             torch.zeros((1, hidden_size), dtype=torch.float32, device=self.device)
@@ -280,7 +329,7 @@ class Mnemo(Editor):
         self._base_model.eval()
         final_loss = float("inf")
         try:
-            with self._interceptor_or_raise().arm_training(
+            with self._interceptor_or_raise().arm_training_delta(
                 delta,
                 len(prompt_ids) - 1,
             ):
@@ -311,6 +360,7 @@ class Mnemo(Editor):
 
         if not bool(torch.isfinite(delta).all()):
             raise FloatingPointError("MNEMO delta became non-finite.")
+        delta_norm = float(torch.linalg.vector_norm(delta.detach().float()))
         block_dtype = next(
             nethook.get_module(
                 self._base_model,
@@ -319,7 +369,49 @@ class Mnemo(Editor):
                 ),
             ).parameters()
         ).dtype
-        return delta.detach().to(device="cpu", dtype=block_dtype), final_loss
+        value = baseline + delta.detach()
+        return (
+            value.to(device="cpu", dtype=block_dtype),
+            delta_norm,
+            final_loss,
+        )
+
+    def _intervention_state(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        token_index: int,
+    ) -> torch.Tensor:
+        block = nethook.get_module(
+            self._base_model,
+            self.config.intervention_module_tmp.format(
+                self.config.intervention_block
+            ),
+        )
+        captured: list[torch.Tensor] = []
+
+        def capture(_module, _inputs, output) -> None:
+            hidden = nethook.get_hidden_state(output)
+            captured.append(hidden[:, token_index, :].detach())
+
+        handle = block.register_forward_hook(capture)
+        was_training = self._base_model.training
+        self._base_model.eval()
+        try:
+            with torch.inference_mode():
+                self._base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    use_cache=False,
+                )
+        finally:
+            handle.remove()
+            self._base_model.train(was_training)
+        if len(captured) != 1:
+            raise RuntimeError(
+                f"Expected one intervention state, captured {len(captured)}."
+            )
+        return captured[0]
 
     def _request_token_ids(self, request: EditRequest) -> tuple[list[int], list[int]]:
         prompt_ids = self.tokenizer.encode(request.prompt, add_special_tokens=True)
@@ -346,30 +438,52 @@ class Mnemo(Editor):
             raise AttributeError("The language model config has no hidden_size.")
         return int(hidden_size)
 
+    def _set_routing_mode(self, external_only: bool) -> None:
+        score_threshold, margin_threshold = (
+            self.config.router_config.thresholds_for(external_only)
+        )
+        self.router.set_thresholds(score_threshold, margin_threshold)
+        self.memory.set_thresholds(score_threshold, margin_threshold)
+
+    def _proposal_numerical_guard(
+        self,
+        proposal: AlphaEditProposal,
+    ) -> NumericalGuardResult:
+        current_weights = dict(self._base_model.named_parameters())
+        return check_numerical_guard(
+            proposal.deltas,
+            {name: current_weights[name] for name in proposal.deltas},
+            self.config.safety_config,
+        )
+
+    def _commit_without_full_safety(
+        self,
+        proposal: AlphaEditProposal,
+        requests: list[EditRequest],
+        *,
+        safety_status: str,
+    ) -> bool:
+        try:
+            proposal.apply()
+            proposal.commit()
+        except Exception as error:
+            proposal.rollback()
+            self._enter_external_only("commit_error", error=error)
+            return False
+        self._finish_safe_consolidation(
+            requests,
+            None,
+            safety_status=safety_status,
+        )
+        return True
+
     def _validate_and_finish(
         self,
         proposal: AlphaEditProposal,
         requests: list[EditRequest],
+        numerical: NumericalGuardResult,
     ) -> bool:
         safety_config = self.config.safety_config
-        current_weights = dict(self._base_model.named_parameters())
-        numerical = check_numerical_guard(
-            proposal.deltas,
-            {name: current_weights[name] for name in proposal.deltas},
-            safety_config,
-        )
-        if not numerical.safe:
-            proposal.rollback()
-            self._enter_external_only(
-                "numerical",
-                metrics={
-                    "maximum_relative_update_norm": (
-                        numerical.maximum_relative_update_norm
-                    )
-                },
-            )
-            return False
-
         try:
             self._ensure_original_canaries()
             last_safe_logits = self._canary_logits()
@@ -419,7 +533,11 @@ class Mnemo(Editor):
         except Exception as error:
             self._enter_external_only("commit_error", error=error)
             return False
-        self._finish_safe_consolidation(requests, result)
+        self._finish_safe_consolidation(
+            requests,
+            result,
+            safety_status="checked",
+        )
         return True
 
     def _ensure_original_canaries(self) -> None:
@@ -598,17 +716,22 @@ class Mnemo(Editor):
         self,
         requests: list[EditRequest],
         result: ConsolidationSafetyResult | None,
+        *,
+        safety_status: str,
     ) -> None:
         for request in requests:
             self._add_retention_request(request)
         self._pending_requests.clear()
         self.memory.clear()
         self._consolidation_count += 1
+        self._consolidated_edit_count += len(requests)
         report = {
             "safe": True,
             "cycle": self._consolidation_count,
             "consolidated_edits": len(requests),
+            "total_consolidated_edits": self._consolidated_edit_count,
             "external_only": False,
+            "safety_status": safety_status,
         }
         if result is not None:
             report["safety"] = asdict(result)
@@ -634,10 +757,12 @@ class Mnemo(Editor):
         result: ConsolidationSafetyResult | None = None,
     ) -> None:
         self._external_only = True
+        self._set_routing_mode(True)
         report = {
             "safe": False,
             "cycle": self._consolidation_count + 1,
             "retained_external_edits": self.external_memory_size,
+            "total_consolidated_edits": self._consolidated_edit_count,
             "external_only": True,
             "reasons": [reason],
         }

@@ -9,16 +9,18 @@ from ...utils.nethook import get_hidden_state, replace_hidden_state
 from .router import BgeM3Router, ExternalMemoryBank, RoutingDecision
 
 
-class DecoderBlockDeltaInterceptor:
-    """Adds a selected delta to the final prompt token at one block boundary."""
+class DecoderBlockInterceptor:
+    """Applies a routed target state at one decoder-block boundary."""
 
     def __init__(self, block: torch.nn.Module) -> None:
-        self._deltas = torch.empty((0, 0), dtype=torch.float32, device="cpu")
+        self._values = torch.empty((0, 0), dtype=torch.float32, device="cpu")
         self._route_indices: torch.Tensor | None = None
         self._route_active: torch.Tensor | None = None
-        self._direct_deltas: torch.Tensor | None = None
+        self._direct_values: torch.Tensor | None = None
         self._token_indices: torch.Tensor | None = None
         self._prefill_only = True
+        self._intervention_mode = "replace"
+        self._strength = 1.0
         self._consumed = False
         self._armed_hook_calls = 0
         self._applied_rows = torch.empty(0, dtype=torch.bool)
@@ -30,42 +32,42 @@ class DecoderBlockDeltaInterceptor:
 
     @property
     def bank_size(self) -> int:
-        return len(self._deltas)
+        return len(self._values)
 
     @property
-    def deltas(self) -> torch.Tensor:
-        return self._deltas
+    def values(self) -> torch.Tensor:
+        return self._values
 
     def clear(self) -> None:
-        dimension = self._deltas.shape[1] if self._deltas.ndim == 2 else 0
-        self._deltas = torch.empty(
+        dimension = self._values.shape[1] if self._values.ndim == 2 else 0
+        self._values = torch.empty(
             (0, dimension),
-            dtype=self._deltas.dtype,
+            dtype=self._values.dtype,
             device="cpu",
         )
         self.disarm()
 
-    def append_delta(self, delta: torch.Tensor) -> int:
-        values = delta.detach().to(device="cpu")
+    def append_value(self, value: torch.Tensor) -> int:
+        values = value.detach().to(device="cpu")
         if values.ndim == 1:
             values = values.unsqueeze(0)
         if values.ndim != 2 or len(values) != 1:
-            raise ValueError("append_delta expects one vector")
-        if self.bank_size and values.shape[1] != self._deltas.shape[1]:
+            raise ValueError("append_value expects one vector")
+        if self.bank_size and values.shape[1] != self._values.shape[1]:
             raise ValueError(
-                f"Delta dimension changed from {self._deltas.shape[1]} to {values.shape[1]}"
+                f"Value dimension changed from {self._values.shape[1]} to {values.shape[1]}"
             )
         if not self.bank_size:
-            self._deltas = values.clone()
+            self._values = values.clone()
         else:
-            self._deltas = torch.cat((self._deltas, values), dim=0)
+            self._values = torch.cat((self._values, values), dim=0)
         return self.bank_size - 1
 
-    def load_deltas(self, deltas: torch.Tensor) -> None:
-        values = deltas.detach().to(device="cpu")
+    def load_values(self, values: torch.Tensor) -> None:
+        values = values.detach().to(device="cpu")
         if values.ndim != 2:
-            raise ValueError("Delta bank must be a 2D matrix")
-        self._deltas = values.clone()
+            raise ValueError("Value bank must be a 2D matrix")
+        self._values = values.clone()
         self.disarm()
 
     def arm_routes(
@@ -74,42 +76,50 @@ class DecoderBlockDeltaInterceptor:
         *,
         token_indices: int | torch.Tensor = -1,
         prefill_only: bool = True,
+        strength: float = 1.0,
     ) -> None:
         self._reset_observation()
         if len(decision) == 0:
             self.disarm()
             return
         if torch.any(decision.active & (decision.top1_indices < 0)):
-            raise ValueError("Active routes must have a valid delta index")
+            raise ValueError("Active routes must have a valid value index")
         if torch.any(decision.active & (decision.top1_indices >= self.bank_size)):
-            raise IndexError("A routed delta index exceeds the interceptor bank")
+            raise IndexError("A routed value index exceeds the interceptor bank")
         self._route_indices = decision.top1_indices.detach().to(device="cpu", dtype=torch.long)
         self._route_active = decision.active.detach().to(device="cpu", dtype=torch.bool)
-        self._direct_deltas = None
+        self._direct_values = None
         self._token_indices = self._prepare_token_indices(
             token_indices,
             len(decision),
         )
         self._prefill_only = bool(prefill_only)
+        self._intervention_mode = "replace"
+        if not 0.0 < strength <= 1.0:
+            raise ValueError("Replacement strength must be in (0, 1].")
+        self._strength = float(strength)
         self._consumed = False
 
-    def arm_deltas(
+    def arm_values(
         self,
-        deltas: torch.Tensor,
+        values: torch.Tensor,
         *,
         active: torch.Tensor | None = None,
         token_indices: int | torch.Tensor = -1,
         prefill_only: bool = True,
+        strength: float = 1.0,
     ) -> None:
         self._reset_observation()
-        values = deltas if deltas.ndim == 2 else deltas.unsqueeze(0)
+        values = values if values.ndim == 2 else values.unsqueeze(0)
         if values.ndim != 2:
-            raise ValueError("Armed deltas must be a vector or matrix")
+            raise ValueError("Armed values must be a vector or matrix")
+        if not 0.0 < strength <= 1.0:
+            raise ValueError("Replacement strength must be in (0, 1].")
         if active is None:
             active = torch.ones(len(values), dtype=torch.bool, device=values.device)
         if active.ndim != 1 or len(active) != len(values):
-            raise ValueError("Each armed delta must have one active flag")
-        self._direct_deltas = values
+            raise ValueError("Each armed value must have one active flag")
+        self._direct_values = values
         self._route_indices = None
         self._route_active = active
         if isinstance(token_indices, int):
@@ -120,9 +130,11 @@ class DecoderBlockDeltaInterceptor:
                 device=values.device,
             )
         if token_indices.ndim != 1 or len(token_indices) != len(values):
-            raise ValueError("Each armed delta must have one token index")
+            raise ValueError("Each armed value must have one token index")
         self._token_indices = token_indices
         self._prefill_only = bool(prefill_only)
+        self._intervention_mode = "replace"
+        self._strength = float(strength)
         self._consumed = False
 
     def arm_memory(
@@ -132,6 +144,7 @@ class DecoderBlockDeltaInterceptor:
         *,
         token_indices: int | torch.Tensor = -1,
         prefill_only: bool = True,
+        strength: float = 1.0,
     ) -> None:
         if len(decision) == 0:
             self.disarm()
@@ -144,25 +157,37 @@ class DecoderBlockDeltaInterceptor:
             self.disarm()
             return
         safe_indices = decision.top1_indices.clamp_min(0)
-        self.arm_deltas(
-            memory.deltas[safe_indices],
+        self.arm_values(
+            memory.values[safe_indices],
             active=decision.active,
             token_indices=token_indices,
             prefill_only=prefill_only,
+            strength=strength,
         )
 
     @contextmanager
-    def arm_training(
+    def arm_training_delta(
         self,
         delta: torch.Tensor,
         token_index: int | torch.Tensor,
     ):
         """Force a differentiable delta route for repeated optimization forwards."""
-        self.arm_deltas(
-            delta,
-            token_indices=token_index,
-            prefill_only=False,
+        self._reset_observation()
+        values = delta if delta.ndim == 2 else delta.unsqueeze(0)
+        if values.ndim != 2:
+            raise ValueError("Training delta must be a vector or matrix")
+        self._direct_values = values
+        self._route_indices = None
+        self._route_active = torch.ones(
+            len(values),
+            dtype=torch.bool,
+            device=values.device,
         )
+        self._token_indices = self._prepare_token_indices(token_index, len(values))
+        self._prefill_only = False
+        self._intervention_mode = "add"
+        self._strength = 1.0
+        self._consumed = False
         try:
             yield delta
         finally:
@@ -171,7 +196,7 @@ class DecoderBlockDeltaInterceptor:
     def disarm(self) -> None:
         self._route_indices = None
         self._route_active = None
-        self._direct_deltas = None
+        self._direct_values = None
         self._token_indices = None
         self._consumed = False
 
@@ -209,8 +234,8 @@ class DecoderBlockDeltaInterceptor:
             device=hidden.device,
             dtype=torch.bool,
         )
-        if self._direct_deltas is not None:
-            deltas = self._expand_batch(self._direct_deltas, hidden.shape[0]).to(
+        if self._direct_values is not None:
+            values = self._expand_batch(self._direct_values, hidden.shape[0]).to(
                 device=hidden.device,
                 dtype=hidden.dtype,
             )
@@ -219,11 +244,11 @@ class DecoderBlockDeltaInterceptor:
                 return output
             indices = self._expand_batch(self._route_indices, hidden.shape[0])
             safe_indices = indices.clamp_min(0)
-            deltas = self._deltas[safe_indices].to(device=hidden.device, dtype=hidden.dtype)
+            values = self._values[safe_indices].to(device=hidden.device, dtype=hidden.dtype)
 
-        if deltas.shape[1] != hidden.shape[2]:
+        if values.shape[1] != hidden.shape[2]:
             raise ValueError(
-                f"Delta dimension {deltas.shape[1]} does not match hidden size {hidden.shape[2]}"
+                f"Value dimension {values.shape[1]} does not match hidden size {hidden.shape[2]}"
             )
 
         self._consumed = True
@@ -254,7 +279,16 @@ class DecoderBlockDeltaInterceptor:
         self._applied_rows = active.detach().to(device="cpu")
         self._applied_token_indices = token_indices.detach().to(device="cpu")
         updated = hidden.clone()
-        updated[rows, token_indices, :] += deltas * active.unsqueeze(1)
+        current = hidden[rows, token_indices, :]
+        if self._intervention_mode == "add":
+            intervened = current + values
+        else:
+            intervened = current + self._strength * (values - current)
+        updated[rows, token_indices, :] = torch.where(
+            active.unsqueeze(1),
+            intervened,
+            current,
+        )
         return replace_hidden_state(output, updated)
 
     @staticmethod
@@ -288,9 +322,10 @@ class PrefillRoutingModel:
         model: torch.nn.Module,
         tokenizer,
         router: BgeM3Router,
-        interceptor: DecoderBlockDeltaInterceptor,
+        interceptor: DecoderBlockInterceptor,
         memory: ExternalMemoryBank | None = None,
         diagnostics: bool = False,
+        intervention_strength: float = 1.0,
     ) -> None:
         object.__setattr__(self, "base_model", model)
         object.__setattr__(self, "tokenizer", tokenizer)
@@ -298,6 +333,11 @@ class PrefillRoutingModel:
         object.__setattr__(self, "interceptor", interceptor)
         object.__setattr__(self, "memory", memory)
         object.__setattr__(self, "diagnostics", bool(diagnostics))
+        object.__setattr__(
+            self,
+            "intervention_strength",
+            float(intervention_strength),
+        )
         object.__setattr__(self, "accepts_routing_prompts", True)
 
     def __getattr__(self, name: str):
@@ -325,6 +365,7 @@ class PrefillRoutingModel:
                 decision,
                 token_indices=token_indices,
                 prefill_only=True,
+                strength=object.__getattribute__(self, "intervention_strength"),
             )
         elif len(memory) == 0:
             interceptor.disarm()
@@ -337,6 +378,7 @@ class PrefillRoutingModel:
                 decision,
                 token_indices=token_indices,
                 prefill_only=True,
+                strength=object.__getattribute__(self, "intervention_strength"),
             )
         try:
             output = object.__getattribute__(self, "base_model").generate(*args, **kwargs)
@@ -392,13 +434,13 @@ class PrefillRoutingModel:
 
             selected_prompt = None
             selected_target = None
-            delta_norm = None
+            value_norm = None
             if memory is not None and 0 <= selected_index < len(memory):
                 metadata = memory.metadata[selected_index]
                 selected_prompt = getattr(metadata, "prompt", None)
                 selected_target = getattr(metadata, "new_ground_truth", None)
-                delta_norm = float(
-                    torch.linalg.vector_norm(memory.deltas[selected_index].float())
+                value_norm = float(
+                    torch.linalg.vector_norm(memory.values[selected_index].float())
                 )
 
             payload = {
@@ -416,7 +458,10 @@ class PrefillRoutingModel:
                 "active": active,
                 "hook_seen": hook_seen,
                 "intercepted": active and hook_seen,
-                "delta_norm": delta_norm,
+                "value_norm": value_norm,
+                "intervention_strength": object.__getattribute__(
+                    self, "intervention_strength"
+                ),
                 "reason": reason,
             }
             if error is not None:

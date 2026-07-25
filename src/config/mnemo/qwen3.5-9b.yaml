@@ -30,28 +30,36 @@ consolidation_cycle: 100
 external_only: false
 intervention_block: 18
 intervention_module_tmp: "model.layers.{}"
+intervention_strength: 1.0
 
 router:
   model_name: BAAI/bge-m3
-  device: cpu
-  fp16: false
+  device: auto
+  fp16: true
+  eager_load: true
   max_length: 384
   batch_size: 32
   gate: score_margin
-  # BGE-M3 FP16, bank 1,000, repeat 0, calibrated at 1% locality FAR.
-  score_threshold: 0.622539758682251
-  margin_threshold: 0.06765425950288773
+  # BGE-M3 FP16 pooled calibration at 1% locality FAR.
+  hybrid:
+    score_threshold: 0.5810490846633911
+    margin_threshold: 0.06471586972475052
+  external_only:
+    score_threshold: 0.6538538336753845
+    margin_threshold: 0.09644604474306107
 
 delta:
   num_steps: 50
   learning_rate: 1.0
   weight_decay: 0.0
-  max_norm: 10.0
+  max_norm: 40.0
   early_stop_loss: 1.0e-3
   target_leading_space: true
 
 safety:
   enabled: true
+  # Keep the numerical guard active; begin full checks after 500 consolidated edits.
+  start_after_edits: 500
   validation_microbatch_size: 4
   canary_prompts:
     - "The sky above the quiet field was"
