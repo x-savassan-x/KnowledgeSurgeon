@@ -1,5 +1,7 @@
 from collections.abc import Sequence
 from contextlib import contextmanager
+import json
+import math
 
 import torch
 
@@ -18,6 +20,9 @@ class DecoderBlockDeltaInterceptor:
         self._token_indices: torch.Tensor | None = None
         self._prefill_only = True
         self._consumed = False
+        self._armed_hook_calls = 0
+        self._applied_rows = torch.empty(0, dtype=torch.bool)
+        self._applied_token_indices = torch.empty(0, dtype=torch.long)
         try:
             self._hook_handle = block.register_forward_hook(self._hook, with_kwargs=True)
         except TypeError:
@@ -70,6 +75,7 @@ class DecoderBlockDeltaInterceptor:
         token_indices: int | torch.Tensor = -1,
         prefill_only: bool = True,
     ) -> None:
+        self._reset_observation()
         if len(decision) == 0:
             self.disarm()
             return
@@ -95,6 +101,7 @@ class DecoderBlockDeltaInterceptor:
         token_indices: int | torch.Tensor = -1,
         prefill_only: bool = True,
     ) -> None:
+        self._reset_observation()
         values = deltas if deltas.ndim == 2 else deltas.unsqueeze(0)
         if values.ndim != 2:
             raise ValueError("Armed deltas must be a vector or matrix")
@@ -172,11 +179,26 @@ class DecoderBlockDeltaInterceptor:
         self.disarm()
         self._hook_handle.remove()
 
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        return {
+            "hook_calls": self._armed_hook_calls,
+            "applied_rows": self._applied_rows.tolist(),
+            "token_indices": self._applied_token_indices.tolist(),
+        }
+
+    def _reset_observation(self) -> None:
+        self._armed_hook_calls = 0
+        self._applied_rows = torch.empty(0, dtype=torch.bool)
+        self._applied_token_indices = torch.empty(0, dtype=torch.long)
+
     def _legacy_hook(self, module, inputs, output):
         return self._hook(module, inputs, {}, output)
 
     def _hook(self, _module, _inputs, _kwargs, output):
-        if self._route_active is None or (self._prefill_only and self._consumed):
+        if self._route_active is None:
+            return output
+        self._armed_hook_calls += 1
+        if self._prefill_only and self._consumed:
             return output
 
         hidden = get_hidden_state(output)
@@ -206,6 +228,7 @@ class DecoderBlockDeltaInterceptor:
 
         self._consumed = True
         if not torch.any(active):
+            self._applied_rows = active.detach().to(device="cpu")
             return output
 
         if self._token_indices is None:
@@ -228,6 +251,8 @@ class DecoderBlockDeltaInterceptor:
         if torch.any((token_indices < 0) | (token_indices >= hidden.shape[1])):
             raise IndexError("An interceptor token index is outside the sequence")
         rows = torch.arange(hidden.shape[0], device=hidden.device)
+        self._applied_rows = active.detach().to(device="cpu")
+        self._applied_token_indices = token_indices.detach().to(device="cpu")
         updated = hidden.clone()
         updated[rows, token_indices, :] += deltas * active.unsqueeze(1)
         return replace_hidden_state(output, updated)
@@ -265,12 +290,14 @@ class PrefillRoutingModel:
         router: BgeM3Router,
         interceptor: DecoderBlockDeltaInterceptor,
         memory: ExternalMemoryBank | None = None,
+        diagnostics: bool = False,
     ) -> None:
         object.__setattr__(self, "base_model", model)
         object.__setattr__(self, "tokenizer", tokenizer)
         object.__setattr__(self, "router", router)
         object.__setattr__(self, "interceptor", interceptor)
         object.__setattr__(self, "memory", memory)
+        object.__setattr__(self, "diagnostics", bool(diagnostics))
         object.__setattr__(self, "accepts_routing_prompts", True)
 
     def __getattr__(self, name: str):
@@ -289,7 +316,9 @@ class PrefillRoutingModel:
         router = object.__getattribute__(self, "router")
         interceptor = object.__getattribute__(self, "interceptor")
         memory = object.__getattribute__(self, "memory")
+        diagnostics = object.__getattribute__(self, "diagnostics")
         token_indices = self._generation_token_indices(args, kwargs)
+        decision = None
         if memory is None:
             decision = router.retrieve_prompts(routing_prompts)
             interceptor.arm_routes(
@@ -299,6 +328,8 @@ class PrefillRoutingModel:
             )
         elif len(memory) == 0:
             interceptor.disarm()
+            if diagnostics:
+                self._log_empty_memory(routing_prompts)
         else:
             decision = memory.route(router.encode(routing_prompts))
             interceptor.arm_memory(
@@ -308,9 +339,109 @@ class PrefillRoutingModel:
                 prefill_only=True,
             )
         try:
-            return object.__getattribute__(self, "base_model").generate(*args, **kwargs)
+            output = object.__getattribute__(self, "base_model").generate(*args, **kwargs)
+            if diagnostics and decision is not None:
+                self._log_routing_decisions(routing_prompts, decision)
+            return output
+        except Exception as error:
+            if diagnostics and decision is not None:
+                self._log_routing_decisions(routing_prompts, decision, error=error)
+            raise
         finally:
             interceptor.disarm()
+
+    def _log_empty_memory(self, prompts: list[str]) -> None:
+        for query_index, prompt in enumerate(prompts):
+            self._emit_diagnostic({
+                "query_index": query_index,
+                "query_prompt": prompt,
+                "memory_size": 0,
+                "active": False,
+                "intercepted": False,
+                "reason": "memory_empty",
+            })
+
+    def _log_routing_decisions(
+        self,
+        prompts: list[str],
+        decision: RoutingDecision,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        router = object.__getattribute__(self, "router")
+        memory = object.__getattribute__(self, "memory")
+        interceptor = object.__getattribute__(self, "interceptor")
+        observation = interceptor.diagnostic_snapshot()
+        hook_seen = int(observation["hook_calls"]) > 0
+
+        for query_index, prompt in enumerate(prompts):
+            selected_index = int(decision.top1_indices[query_index])
+            active = bool(decision.active[query_index])
+            score = float(decision.top1_scores[query_index])
+            margin = float(decision.margins[query_index])
+            below_score = score < router.score_threshold
+            below_margin = margin < router.margin_threshold
+            if active:
+                reason = "pass"
+            elif below_score and below_margin:
+                reason = "score_and_margin_below_threshold"
+            elif below_score:
+                reason = "score_below_threshold"
+            else:
+                reason = "margin_below_threshold"
+
+            selected_prompt = None
+            selected_target = None
+            delta_norm = None
+            if memory is not None and 0 <= selected_index < len(memory):
+                metadata = memory.metadata[selected_index]
+                selected_prompt = getattr(metadata, "prompt", None)
+                selected_target = getattr(metadata, "new_ground_truth", None)
+                delta_norm = float(
+                    torch.linalg.vector_norm(memory.deltas[selected_index].float())
+                )
+
+            payload = {
+                "query_index": query_index,
+                "query_prompt": prompt,
+                "memory_size": len(memory) if memory is not None else router.bank_size,
+                "selected_index": selected_index,
+                "selected_prompt": selected_prompt,
+                "selected_target": selected_target,
+                "top1_score": self._finite_value(score),
+                "score_threshold": router.score_threshold,
+                "top2_score": self._finite_value(float(decision.top2_scores[query_index])),
+                "margin": self._finite_value(margin),
+                "margin_threshold": router.margin_threshold,
+                "active": active,
+                "hook_seen": hook_seen,
+                "intercepted": active and hook_seen,
+                "delta_norm": delta_norm,
+                "reason": reason,
+            }
+            if error is not None:
+                payload["generation_error"] = f"{type(error).__name__}: {error}"
+            self._emit_diagnostic(payload)
+
+        print(
+            "[mnemo-hook] "
+            + json.dumps(observation, ensure_ascii=True, sort_keys=True),
+            flush=True,
+        )
+
+    @staticmethod
+    def _finite_value(value: float) -> float | str:
+        if math.isfinite(value):
+            return value
+        return "inf" if value > 0 else "-inf"
+
+    @staticmethod
+    def _emit_diagnostic(payload: dict[str, object]) -> None:
+        print(
+            "[mnemo-route] "
+            + json.dumps(payload, ensure_ascii=True, sort_keys=True),
+            flush=True,
+        )
 
     def _decode_generation_prompts(self, args: Sequence, kwargs: dict) -> list[str]:
         input_ids = kwargs.get("input_ids", kwargs.get("inputs"))

@@ -194,6 +194,7 @@ class MnemoSafetyConfig:
 class MnemoConfig(AlphaEditConfig):
     consolidation_cycle: int = 100
     external_only: bool = False
+    diagnostics: bool = False
     intervention_block: int = 18
     intervention_module_tmp: str = "model.layers.{}"
     router: dict[str, Any] | MnemoRouterConfig = field(default_factory=dict)
@@ -210,6 +211,8 @@ class MnemoConfig(AlphaEditConfig):
             raise ValueError("Mnemo consolidation_cycle must be positive.")
         if not isinstance(self.external_only, bool):
             raise TypeError("Mnemo external_only must be a boolean.")
+        if not isinstance(self.diagnostics, bool):
+            raise TypeError("Mnemo diagnostics must be a boolean.")
         if self.intervention_block < 0:
             raise ValueError("Mnemo intervention_block must be nonnegative.")
         if "{}" not in self.intervention_module_tmp:

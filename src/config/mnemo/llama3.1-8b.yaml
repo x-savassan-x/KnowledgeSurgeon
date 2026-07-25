@@ -25,6 +25,7 @@ L2: 10
 P_loc: data/assets/alpha_edit_projectors/llama3.1-8b/null_space_project.pt
 
 # MNEMO external-memory cycle
+diagnostics: false
 consolidation_cycle: 100
 external_only: false
 intervention_block: 27

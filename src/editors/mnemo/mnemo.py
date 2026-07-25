@@ -1,5 +1,6 @@
 from dataclasses import asdict
 import gc
+import json
 from pathlib import Path
 import random
 
@@ -82,6 +83,8 @@ class Mnemo(Editor):
         self._original_canary_logits: torch.Tensor | None = None
         self._canary_target_ids: torch.Tensor | None = None
         self.last_delta_loss: float | None = None
+        self.last_delta_norm: float | None = None
+        self.last_delta_saturated: bool | None = None
         self.last_consolidation_report: dict | None = None
         self.consolidation_history: list[dict] = []
         self._install_runtime()
@@ -102,10 +105,31 @@ class Mnemo(Editor):
         self._install_runtime()
         key = self.router.encode([request.prompt])
         delta, loss = self._train_delta(request)
-        self.memory.add(key, delta, metadata=request)
+        memory_index = self.memory.add(key, delta, metadata=request)
         if not self._external_only:
             self._pending_requests.append(request)
         self.last_delta_loss = loss
+        self.last_delta_norm = float(torch.linalg.vector_norm(delta.float()))
+        max_norm = self.config.delta_config.max_norm
+        self.last_delta_saturated = self.last_delta_norm >= max_norm * (1.0 - 1.0e-4)
+        if self.config.diagnostics:
+            print(
+                "[mnemo-edit] "
+                + json.dumps(
+                    {
+                        "memory_index": memory_index,
+                        "prompt": request.prompt,
+                        "target": request.new_ground_truth,
+                        "final_loss": self.last_delta_loss,
+                        "delta_norm": self.last_delta_norm,
+                        "max_norm": max_norm,
+                        "max_norm_reached": self.last_delta_saturated,
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
 
         if (
             not self._external_only
@@ -156,6 +180,8 @@ class Mnemo(Editor):
         self._original_canary_logits = None
         self._canary_target_ids = None
         self.last_delta_loss = None
+        self.last_delta_norm = None
+        self.last_delta_saturated = None
         self.last_consolidation_report = None
         self.consolidation_history.clear()
         if self._interceptor is not None:
@@ -206,6 +232,7 @@ class Mnemo(Editor):
             self.router,
             self._interceptor,
             memory=self.memory,
+            diagnostics=self.config.diagnostics,
         )
         self._closed = False
 
