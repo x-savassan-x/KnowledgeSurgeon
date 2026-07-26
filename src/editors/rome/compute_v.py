@@ -138,9 +138,6 @@ def compute_v(
         if loss < 5e-2:
             break
 
-        if it == hparams.v_num_grad_steps - 1:
-            break
-
         loss.backward()
         opt.step()
 

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..alpha_edit.alpha_edit_main import (
+from .alpha_edit import (
     AlphaEditCacheState,
     _resolve_cache_matrix,
     commit_AlphaEdit_cache_factors,
@@ -12,9 +12,9 @@ from ..alpha_edit.alpha_edit_main import (
     release_AlphaEdit_projector,
     upd_matrix_match_shape,
 )
-from ..editor_utils import EditRequest
-from ...utils import nethook
-from ...utils.devices import copy_to_param
+from ....utils import nethook
+from ....utils.devices import copy_to_param
+from ...editor_utils import EditRequest
 
 
 _UPDATE_CHUNK_ELEMENTS = 1_000_000
@@ -47,14 +47,13 @@ def _backend_request(request: EditRequest) -> dict[str, str]:
     return {
         "prompt": request.prompt,
         "subject": request.subject,
-        "target_new": request.new_ground_truth,
-        "target_true": request.old_ground_truth,
+        "target_new": request.answer,
     }
 
 
 @dataclass
-class AlphaEditProposal:
-    """A deferred AlphaEdit update that can be committed or rolled back exactly."""
+class ConsolidationProposal:
+    """A deferred projected update that can be committed or rolled back exactly."""
 
     model: AutoModelForCausalLM
     cache_state: AlphaEditCacheState
@@ -162,8 +161,8 @@ class AlphaEditProposal:
                 copy_to_param(params[name], snapshot)
 
 
-class AlphaEditWriter:
-    """Owns MNEMO's AlphaEdit cache and last-resettable weight state."""
+class ConsolidationWriter:
+    """Owns Mnemo's private consolidation cache and reset state."""
 
     def __init__(
         self,
@@ -189,7 +188,7 @@ class AlphaEditWriter:
     def origin_weights(self) -> dict[str, torch.Tensor]:
         return self._origin_weights
 
-    def propose(self, requests: list[EditRequest]) -> AlphaEditProposal:
+    def propose(self, requests: list[EditRequest]) -> ConsolidationProposal:
         if not requests:
             raise ValueError("Cannot consolidate an empty request batch.")
         load_AlphaEdit_projector(self.config)
@@ -206,7 +205,7 @@ class AlphaEditWriter:
             cache_matrix=cache_matrix,
             defer_cache_commit=True,
         )
-        return AlphaEditProposal(
+        return ConsolidationProposal(
             model=self.model,
             cache_state=self.cache_state,
             deltas=deltas,

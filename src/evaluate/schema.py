@@ -8,36 +8,34 @@ from typing import Any
 @dataclass
 class EvalRecord:
     prompt: str
-    ground_truths: list[str]
+    answers: list[str]
     prediction: str = ""
     score: float = 0
 
     def __post_init__(self) -> None:
         seen: set[str] = set()
         normalized: list[str] = []
-        for ground_truth in self.ground_truths:
-            value = str(ground_truth)
+        for answer in self.answers:
+            value = str(answer)
             key = value.casefold()
             if key in seen:
                 continue
             seen.add(key)
             normalized.append(value)
-        self.ground_truths = normalized
+        self.answers = normalized
 
     @property
-    def ground_truth(self) -> str:
-        return self.ground_truths[0] if self.ground_truths else ""
+    def answer(self) -> str:
+        return self.answers[0] if self.answers else ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvalRecord:
-        ground_truths = data.get("ground_truths")
-        if ground_truths is None:
-            ground_truth = data.get("ground_truth", "")
-            ground_truths = [ground_truth] if ground_truth else []
-
+        answers = data["answers"]
+        if not isinstance(answers, list):
+            raise TypeError("EvalRecord answers must be a list")
         return cls(
             prompt=data.get("prompt", ""),
-            ground_truths=list(ground_truths),
+            answers=answers,
             prediction=data.get("prediction", ""),
             score=float(data.get("score", 0)),
         )

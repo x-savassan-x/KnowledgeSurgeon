@@ -320,7 +320,13 @@ def save_hardware_results(
         evaluation_dir=evaluation_dir,
     )
     hardware = dict(hardware)
-    for key in ("schema_version", "run_index", "captured_at"):
+    for key in (
+        "schema_version",
+        "run_index",
+        "captured_at",
+        "notes",
+        "provider_env",
+    ):
         hardware.pop(key, None)
     _write_json(path, hardware)
 

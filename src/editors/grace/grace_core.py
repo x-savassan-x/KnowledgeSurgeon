@@ -220,7 +220,8 @@ class GraceAdapter(torch.nn.Module):
         self._value_storage[self._num_keys].copy_(new_value.detach().view(-1))
         self._epsilon_storage[self._num_keys] = self.init_epsilon
         self._num_keys += 1
-        self.key_labels = [self.edit_label] + self.key_labels
+        # Keep metadata in the same row order as keys, values, and epsilons.
+        self.key_labels = self.key_labels + [self.edit_label]
         self.edit_ids.append(new_edit_id)
 
     def delete_key(self, edit_id: int) -> None:

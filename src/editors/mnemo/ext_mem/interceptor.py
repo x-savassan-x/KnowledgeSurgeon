@@ -5,11 +5,12 @@ import math
 
 import torch
 
-from ...utils.nethook import get_hidden_state, replace_hidden_state
-from .router import BgeM3Router, ExternalMemoryBank, RoutingDecision
+from ....utils.nethook import get_hidden_state, replace_hidden_state
+from .router import Router, RoutingDecision
+from .storage import MnemoStorage, PatchStore
 
 
-class DecoderBlockInterceptor:
+class Interceptor:
     """Applies a routed target state at one decoder-block boundary."""
 
     def __init__(self, block: torch.nn.Module) -> None:
@@ -137,9 +138,9 @@ class DecoderBlockInterceptor:
         self._strength = float(strength)
         self._consumed = False
 
-    def arm_memory(
+    def arm_patches(
         self,
-        memory: ExternalMemoryBank,
+        patches: PatchStore,
         decision: RoutingDecision,
         *,
         token_indices: int | torch.Tensor = -1,
@@ -150,15 +151,15 @@ class DecoderBlockInterceptor:
             self.disarm()
             return
         if torch.any(decision.active & (decision.top1_indices < 0)):
-            raise ValueError("Active routes must have a valid memory index")
-        if torch.any(decision.active & (decision.top1_indices >= len(memory))):
-            raise IndexError("A routed memory index exceeds the memory bank")
-        if len(memory) == 0:
+            raise ValueError("Active routes must have a valid patch index")
+        if torch.any(decision.active & (decision.top1_indices >= len(patches))):
+            raise IndexError("A routed patch index exceeds the patch store")
+        if len(patches) == 0:
             self.disarm()
             return
         safe_indices = decision.top1_indices.clamp_min(0)
         self.arm_values(
-            memory.values[safe_indices],
+            patches.values[safe_indices],
             active=decision.active,
             token_indices=token_indices,
             prefill_only=prefill_only,
@@ -321,9 +322,9 @@ class PrefillRoutingModel:
         self,
         model: torch.nn.Module,
         tokenizer,
-        router: BgeM3Router,
-        interceptor: DecoderBlockInterceptor,
-        memory: ExternalMemoryBank | None = None,
+        router: Router,
+        interceptor: Interceptor,
+        storage: MnemoStorage | None = None,
         diagnostics: bool = False,
         intervention_strength: float = 1.0,
     ) -> None:
@@ -331,7 +332,7 @@ class PrefillRoutingModel:
         object.__setattr__(self, "tokenizer", tokenizer)
         object.__setattr__(self, "router", router)
         object.__setattr__(self, "interceptor", interceptor)
-        object.__setattr__(self, "memory", memory)
+        object.__setattr__(self, "storage", storage)
         object.__setattr__(self, "diagnostics", bool(diagnostics))
         object.__setattr__(
             self,
@@ -355,11 +356,11 @@ class PrefillRoutingModel:
 
         router = object.__getattribute__(self, "router")
         interceptor = object.__getattribute__(self, "interceptor")
-        memory = object.__getattribute__(self, "memory")
+        storage = object.__getattribute__(self, "storage")
         diagnostics = object.__getattribute__(self, "diagnostics")
         token_indices = self._generation_token_indices(args, kwargs)
         decision = None
-        if memory is None:
+        if storage is None:
             decision = router.retrieve_prompts(routing_prompts)
             interceptor.arm_routes(
                 decision,
@@ -367,14 +368,14 @@ class PrefillRoutingModel:
                 prefill_only=True,
                 strength=object.__getattribute__(self, "intervention_strength"),
             )
-        elif len(memory) == 0:
+        elif len(storage) == 0:
             interceptor.disarm()
             if diagnostics:
                 self._log_empty_memory(routing_prompts)
         else:
-            decision = memory.route(router.encode(routing_prompts))
-            interceptor.arm_memory(
-                memory,
+            decision = storage.route(router.encode(routing_prompts))
+            interceptor.arm_patches(
+                storage.patches,
                 decision,
                 token_indices=token_indices,
                 prefill_only=True,
@@ -411,7 +412,7 @@ class PrefillRoutingModel:
         error: Exception | None = None,
     ) -> None:
         router = object.__getattribute__(self, "router")
-        memory = object.__getattribute__(self, "memory")
+        storage = object.__getattribute__(self, "storage")
         interceptor = object.__getattribute__(self, "interceptor")
         observation = interceptor.diagnostic_snapshot()
         hook_seen = int(observation["hook_calls"]) > 0
@@ -433,23 +434,25 @@ class PrefillRoutingModel:
                 reason = "margin_below_threshold"
 
             selected_prompt = None
-            selected_target = None
+            selected_subject = None
+            selected_answer = None
             value_norm = None
-            if memory is not None and 0 <= selected_index < len(memory):
-                metadata = memory.metadata[selected_index]
-                selected_prompt = getattr(metadata, "prompt", None)
-                selected_target = getattr(metadata, "new_ground_truth", None)
+            if storage is not None and 0 <= selected_index < len(storage):
+                selected_subject = storage.edits.subject_at(selected_index)
+                selected_prompt = storage.edits.prompt_at(selected_index)
+                selected_answer = storage.edits.answer_at(selected_index)
                 value_norm = float(
-                    torch.linalg.vector_norm(memory.values[selected_index].float())
+                    torch.linalg.vector_norm(storage.values[selected_index].float())
                 )
 
             payload = {
                 "query_index": query_index,
                 "query_prompt": prompt,
-                "memory_size": len(memory) if memory is not None else router.bank_size,
+                "memory_size": len(storage) if storage is not None else router.bank_size,
                 "selected_index": selected_index,
+                "selected_subject": selected_subject,
                 "selected_prompt": selected_prompt,
-                "selected_target": selected_target,
+                "selected_answer": selected_answer,
                 "top1_score": self._finite_value(score),
                 "score_threshold": router.score_threshold,
                 "top2_score": self._finite_value(float(decision.top2_scores[query_index])),

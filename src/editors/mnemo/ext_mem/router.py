@@ -1,4 +1,4 @@
-import copy
+from abc import ABC, abstractmethod
 from contextlib import redirect_stderr
 from dataclasses import dataclass
 from io import StringIO
@@ -20,127 +20,23 @@ class RoutingDecision:
         return len(self.active)
 
 
-@dataclass(frozen=True)
-class ExternalMemoryState:
-    keys: torch.Tensor
-    values: torch.Tensor
-    metadata: list[object]
-    score_threshold: float
-    margin_threshold: float
+class PromptEncoder(ABC):
+    """Turns prompts into dense embedding rows for a Router."""
+
+    @abstractmethod
+    def load(self) -> None:
+        pass
+
+    @abstractmethod
+    def encode(self, prompts: list[str]) -> torch.Tensor:
+        pass
 
 
-class ExternalMemoryBank:
-    """CPU-backed key/value bank with deterministic score-and-margin routing."""
-
-    def __init__(self, score_threshold: float, margin_threshold: float) -> None:
-        self.score_threshold = float(score_threshold)
-        self.margin_threshold = float(margin_threshold)
-        self._keys = torch.empty((0, 0), dtype=torch.float32, device="cpu")
-        self._values = torch.empty((0, 0), dtype=torch.float32, device="cpu")
-        self._metadata: list[object] = []
-
-    def __len__(self) -> int:
-        return len(self._keys)
-
-    @property
-    def keys(self) -> torch.Tensor:
-        return self._keys
-
-    @property
-    def values(self) -> torch.Tensor:
-        return self._values
-
-    @property
-    def metadata(self) -> list[object]:
-        return self._metadata
-
-    def add(
-        self,
-        key: torch.Tensor | np.ndarray,
-        value: torch.Tensor,
-        metadata: object = None,
-    ) -> int:
-        normalized_key = _cpu_float_matrix(key)
-        if normalized_key.ndim == 1:
-            normalized_key = normalized_key.unsqueeze(0)
-        normalized_key = _normalize_rows(normalized_key)
-        if normalized_key.shape[0] != 1:
-            raise ValueError("ExternalMemoryBank.add expects one key")
-
-        value_row = value.detach().to(device="cpu")
-        if value_row.ndim == 1:
-            value_row = value_row.unsqueeze(0)
-        if value_row.ndim != 2 or value_row.shape[0] != 1:
-            raise ValueError("ExternalMemoryBank.add expects one value")
-
-        if len(self):
-            if normalized_key.shape[1] != self._keys.shape[1]:
-                raise ValueError("Key embedding dimension changed")
-            if value_row.shape[1] != self._values.shape[1]:
-                raise ValueError("Value hidden dimension changed")
-            value_row = value_row.to(dtype=self._values.dtype)
-            self._keys = torch.cat((self._keys, normalized_key), dim=0)
-            self._values = torch.cat((self._values, value_row), dim=0)
-        else:
-            self._keys = normalized_key.clone()
-            self._values = value_row.clone()
-        self._metadata.append(copy.deepcopy(metadata))
-        return len(self) - 1
-
-    def clear(self) -> None:
-        key_dimension = self._keys.shape[1] if self._keys.ndim == 2 else 0
-        value_dimension = self._values.shape[1] if self._values.ndim == 2 else 0
-        value_dtype = self._values.dtype
-        self._keys = torch.empty((0, key_dimension), dtype=torch.float32, device="cpu")
-        self._values = torch.empty((0, value_dimension), dtype=value_dtype, device="cpu")
-        self._metadata.clear()
-
-    def copy_state(self) -> ExternalMemoryState:
-        return ExternalMemoryState(
-            keys=self._keys.clone(),
-            values=self._values.clone(),
-            metadata=copy.deepcopy(self._metadata),
-            score_threshold=self.score_threshold,
-            margin_threshold=self.margin_threshold,
-        )
-
-    def load_state(self, state: ExternalMemoryState) -> None:
-        keys = _normalize_rows(_cpu_float_matrix(state.keys))
-        values = state.values.detach().to(device="cpu")
-        if keys.ndim != 2 or values.ndim != 2 or len(keys) != len(values):
-            raise ValueError("External memory keys and values must be aligned matrices")
-        if len(state.metadata) != len(keys):
-            raise ValueError("External memory metadata must align with keys")
-        self._keys = keys.clone()
-        self._values = values.clone()
-        self._metadata = copy.deepcopy(state.metadata)
-        self.score_threshold = float(state.score_threshold)
-        self.margin_threshold = float(state.margin_threshold)
-
-    def set_thresholds(self, score_threshold: float, margin_threshold: float) -> None:
-        self.score_threshold = float(score_threshold)
-        self.margin_threshold = float(margin_threshold)
-
-    def route(self, query_keys: torch.Tensor | np.ndarray) -> RoutingDecision:
-        queries = _cpu_float_matrix(query_keys)
-        if queries.ndim == 1:
-            queries = queries.unsqueeze(0)
-        queries = _normalize_rows(queries)
-        return _exact_route(
-            queries,
-            self._keys,
-            self.score_threshold,
-            self.margin_threshold,
-        )
-
-
-class BgeM3Router:
-    """Dense BGE-M3 router with an exact cosine score-and-margin gate."""
+class BgeM3Encoder(PromptEncoder):
+    """Dense prompt encoder backed by FlagEmbedding's BGE-M3 model."""
 
     def __init__(
         self,
-        score_threshold: float,
-        margin_threshold: float,
         *,
         model_name: str = "BAAI/bge-m3",
         device: str = "cpu",
@@ -154,46 +50,21 @@ class BgeM3Router:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
 
-        self.score_threshold = float(score_threshold)
-        self.margin_threshold = float(margin_threshold)
         self.model_name = model_name
         self.device = str(device)
         self.use_fp16 = bool(use_fp16 and self.device.startswith("cuda"))
         self.max_length = int(max_length)
         self.batch_size = int(batch_size)
         self._embedder = embedder
-        self._keys = torch.empty((0, 0), dtype=torch.float32, device="cpu")
-
-    @property
-    def bank_size(self) -> int:
-        return len(self._keys)
-
-    @property
-    def embedding_dimension(self) -> int | None:
-        return None if self._keys.ndim != 2 or self._keys.shape[1] == 0 else self._keys.shape[1]
-
-    @property
-    def keys(self) -> torch.Tensor:
-        return self._keys
-
-    def clear(self) -> None:
-        dimension = self._keys.shape[1] if self._keys.ndim == 2 else 0
-        self._keys = torch.empty((0, dimension), dtype=torch.float32, device="cpu")
 
     def load(self) -> None:
         self._get_embedder()
 
-    def set_thresholds(self, score_threshold: float, margin_threshold: float) -> None:
-        self.score_threshold = float(score_threshold)
-        self.margin_threshold = float(margin_threshold)
-
     def encode(self, prompts: list[str]) -> torch.Tensor:
         if not prompts:
-            dimension = self.embedding_dimension or 0
-            return torch.empty((0, dimension), dtype=torch.float32, device="cpu")
+            return torch.empty((0, 0), dtype=torch.float32, device="cpu")
 
-        embedder = self._get_embedder()
-        encode = embedder.encode
+        encode = self._get_embedder().encode
         kwargs = {
             "batch_size": self.batch_size,
             "max_length": self.max_length,
@@ -228,7 +99,68 @@ class BgeM3Router:
             raise ValueError(
                 f"Unexpected embedding shape {tuple(embeddings.shape)} for {len(prompts)} prompts"
             )
-        return _normalize_rows(embeddings)
+        return embeddings
+
+    def _get_embedder(self):
+        if self._embedder is None:
+            from FlagEmbedding import BGEM3FlagModel
+
+            self._embedder = BGEM3FlagModel(
+                self.model_name,
+                use_fp16=self.use_fp16,
+                devices=self.device,
+            )
+        return self._embedder
+
+
+class Router:
+    """Exact cosine retrieval with a score-and-margin activation gate."""
+
+    def __init__(
+        self,
+        encoder: PromptEncoder,
+        score_threshold: float,
+        margin_threshold: float,
+    ) -> None:
+        self.encoder = encoder
+        self.score_threshold = float(score_threshold)
+        self.margin_threshold = float(margin_threshold)
+        self._keys = torch.empty((0, 0), dtype=torch.float32, device="cpu")
+
+    @property
+    def bank_size(self) -> int:
+        return len(self._keys)
+
+    @property
+    def embedding_dimension(self) -> int | None:
+        return None if self._keys.ndim != 2 or self._keys.shape[1] == 0 else self._keys.shape[1]
+
+    @property
+    def keys(self) -> torch.Tensor:
+        return self._keys
+
+    def clear(self) -> None:
+        dimension = self._keys.shape[1] if self._keys.ndim == 2 else 0
+        self._keys = torch.empty((0, dimension), dtype=torch.float32, device="cpu")
+
+    def load(self) -> None:
+        self.encoder.load()
+
+    def set_thresholds(self, score_threshold: float, margin_threshold: float) -> None:
+        self.score_threshold = float(score_threshold)
+        self.margin_threshold = float(margin_threshold)
+
+    def encode(self, prompts: list[str]) -> torch.Tensor:
+        if not prompts:
+            dimension = self.embedding_dimension or 0
+            return torch.empty((0, dimension), dtype=torch.float32, device="cpu")
+
+        embeddings = _normalize_rows(_cpu_float_matrix(self.encoder.encode(prompts)))
+        if embeddings.ndim != 2 or embeddings.shape[0] != len(prompts):
+            raise ValueError(
+                f"Unexpected embedding shape {tuple(embeddings.shape)} for {len(prompts)} prompts"
+            )
+        return embeddings
 
     def add_prompts(self, prompts: list[str]) -> torch.Tensor:
         embeddings = self.encode(prompts)
@@ -282,17 +214,6 @@ class BgeM3Router:
             self.margin_threshold,
         )
 
-    def _get_embedder(self):
-        if self._embedder is None:
-            from FlagEmbedding import BGEM3FlagModel
-
-            self._embedder = BGEM3FlagModel(
-                self.model_name,
-                use_fp16=self.use_fp16,
-                devices=self.device,
-            )
-        return self._embedder
-
     @staticmethod
     def _empty_decision(count: int) -> RoutingDecision:
         return RoutingDecision(
@@ -302,6 +223,43 @@ class BgeM3Router:
             margins=torch.full((count,), -torch.inf, dtype=torch.float32),
             active=torch.zeros(count, dtype=torch.bool),
         )
+
+
+ROUTER_ENCODERS: dict[str, type[PromptEncoder]] = {
+    "bge-m3": BgeM3Encoder,
+}
+
+
+def build_router(
+    *,
+    backend: str,
+    score_threshold: float,
+    margin_threshold: float,
+    model_name: str,
+    device: str,
+    use_fp16: bool,
+    max_length: int,
+    batch_size: int,
+) -> Router:
+    backend_key = backend.strip().casefold().replace("_", "-")
+    encoder_type = ROUTER_ENCODERS.get(backend_key)
+    if encoder_type is None:
+        supported = ", ".join(sorted(ROUTER_ENCODERS))
+        raise ValueError(
+            f"Unsupported Mnemo router backend {backend!r}. Supported backends: {supported}."
+        )
+    encoder = encoder_type(
+        model_name=model_name,
+        device=device,
+        use_fp16=use_fp16,
+        max_length=max_length,
+        batch_size=batch_size,
+    )
+    return Router(
+        encoder=encoder,
+        score_threshold=score_threshold,
+        margin_threshold=margin_threshold,
+    )
 
 
 def _cpu_float_matrix(values: torch.Tensor | np.ndarray) -> torch.Tensor:
@@ -328,7 +286,7 @@ def _exact_route(
     if queries.ndim != 2 or keys.ndim != 2:
         raise ValueError("Router queries and keys must be 2D matrices")
     if len(keys) == 0:
-        return BgeM3Router._empty_decision(len(queries))
+        return Router._empty_decision(len(queries))
     if queries.shape[1] != keys.shape[1]:
         raise ValueError(
             f"Query dimension {queries.shape[1]} does not match key dimension {keys.shape[1]}"

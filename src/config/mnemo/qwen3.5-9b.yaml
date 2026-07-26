@@ -1,30 +1,27 @@
 alg_name: Mnemo
 model_config: ../base/qwen3.5-9b.yaml
 
-# AlphaEdit consolidation writer
-layers: [4, 5, 6, 7, 8]
-fact_token: subject_last
-v_num_grad_steps: 25
-v_lr: 5.0e-1
-v_loss_layer: 27
-v_weight_decay: 1.0e-3
-clamp_norm_factor: 4
-kl_factor: 0.0625
+consolidation:
+  layers: [4, 5, 6, 7, 8]
+  fact_token: subject_last
+  v_num_grad_steps: 25
+  v_lr: 5.0e-1
+  v_loss_layer: 27
+  v_weight_decay: 1.0e-3
+  clamp_norm_factor: 4
+  kl_factor: 0.0625
+  layer_module_tmp: "model.layers.{}"
+  rewrite_module_tmp: "model.layers.{}.mlp.down_proj"
+  ln_f_module: "model.norm"
+  lm_head_module: "lm_head"
+  mom2_dataset: wikipedia
+  mom2_n_samples: 100000
+  mom2_dtype: float32
+  stats_dir: data/assets/layer_stats
+  nullspace_threshold: 2.0e-2
+  L2: 1
+  P_loc: data/assets/alpha_edit_projectors/qwen3.5-9b/null_space_project.pt
 
-layer_module_tmp: "model.layers.{}"
-rewrite_module_tmp: "model.layers.{}.mlp.down_proj"
-ln_f_module: "model.norm"
-lm_head_module: "lm_head"
-
-mom2_dataset: wikipedia
-mom2_n_samples: 100000
-mom2_dtype: float32
-stats_dir: data/assets/layer_stats
-nullspace_threshold: 2.0e-2
-L2: 1
-P_loc: data/assets/alpha_edit_projectors/qwen3.5-9b/null_space_project.pt
-
-# MNEMO external-memory cycle
 diagnostics: false
 consolidation_cycle: 100
 external_only: false
@@ -33,6 +30,7 @@ intervention_module_tmp: "model.layers.{}"
 intervention_strength: 1.0
 
 router:
+  backend: bge-m3
   model_name: BAAI/bge-m3
   device: auto
   fp16: true
@@ -40,7 +38,6 @@ router:
   max_length: 384
   batch_size: 32
   gate: score_margin
-  # BGE-M3 FP16 pooled calibration at 1% locality FAR.
   hybrid:
     score_threshold: 0.5810490846633911
     margin_threshold: 0.06471586972475052
@@ -58,7 +55,6 @@ delta:
 
 safety:
   enabled: true
-  # Keep the numerical guard active; begin full checks after 500 consolidated edits.
   start_after_edits: 500
   validation_microbatch_size: 4
   canary_prompts:

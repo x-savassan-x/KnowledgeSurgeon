@@ -67,9 +67,9 @@ def snapshot_eval_inputs(
 def edit_requests_to_payload(edit_requests: list[Any], step: int) -> list[dict[str, Any]]:
     return [
         {
+            "subject": request.subject,
             "prompt": request.prompt,
-            "old_ground_truth": request.old_ground_truth,
-            "new_ground_truth": request.new_ground_truth,
+            "answer": request.answer,
         }
         for request in edit_requests[:step]
     ]

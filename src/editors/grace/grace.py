@@ -23,9 +23,7 @@ class GRACE(Editor):
     def edit(self, request: EditRequest) -> None:
         ee_request = [{
             "prompt": request.prompt,
-            "target_new": request.new_ground_truth,
-            "target_true": request.old_ground_truth,
-            "subject": request.subject,
+            "target_new": request.answer,
         }]
 
         if self._grace_model is None:

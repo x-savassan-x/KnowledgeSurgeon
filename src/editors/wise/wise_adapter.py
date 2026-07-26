@@ -26,6 +26,12 @@ edit_history = []
 merge_group_edit_history = []
 
 
+def clear_edit_histories() -> None:
+    """Discard replay data retained by previous WISE editing runs."""
+    edit_history.clear()
+    merge_group_edit_history.clear()
+
+
 def euc(
     query: Tensor,
     key: Tensor,
@@ -54,21 +60,16 @@ def _infer_score(dist: Tensor | float) -> Tensor | float:
 
 
 class EarlyStopMeter:
-    def __init__(self, patience: int = 5, min_delta: float = 1e-3) -> None:
-        self.patience = patience
-        self.min_delta = min_delta
-        self.best = None
-        self.counter = 0
+    def __init__(self) -> None:
+        self.previous = 0.0
+        self.value = 1e9
 
     def update(self, val: float) -> None:
-        if self.best is None or val < self.best - self.min_delta:
-            self.best = val
-            self.counter = 0
-        else:
-            self.counter += 1
+        self.previous = self.value
+        self.value = val
 
     def stop(self) -> bool:
-        return self.counter >= self.patience
+        return abs(self.value - self.previous) <= 1e-4 and self.value <= 0.02
 
 
 class EditingMeanAct:
@@ -303,7 +304,11 @@ class WISEModule(torch.nn.Module):
         deact_mask: list[Tensor | None] | None = None,
     ) -> None:
         global edit_history, merge_group_edit_history
-        edit_history.append([{f"{k1}": v1.to('cpu') for k1, v1 in tokens.items()}, False])
+        if self.config.replay:
+            edit_history.append([
+                {f"{key}": value.to("cpu") for key, value in tokens.items()},
+                False,
+            ])
         last_prompt_token_loc = (tokens["labels"] == -100).sum(dim=-1) - 1
 
         setattr(self.model.get_submodule(self.layer), "training", True)
@@ -386,8 +391,9 @@ class WISEModule(torch.nn.Module):
         if self.config.save_freq is not None and editing_total_cnt % self.config.save_freq == 0:
             self.get_adapter_layer().save_weight()
         if editing_total_cnt % self.config.merge_freq == 0:
-            merge_group_edit_history.append(edit_history)
-            edit_history = []
+            if self.config.replay:
+                merge_group_edit_history.append(edit_history)
+                edit_history = []
             self.get_adapter_layer().merge_weight()
 
     def _norm_constraint(self, norm_constraint: float) -> None:

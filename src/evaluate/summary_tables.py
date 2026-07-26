@@ -267,23 +267,16 @@ def _hardware_first_gpu_field(payload: dict[str, Any] | None, field: str) -> str
 def _hardware_pcie_label(payload: dict[str, Any] | None) -> str:
     if not payload:
         return "-"
-    provider_label = _hardware_metadata_field(
-        payload,
-        (
-            "provider_reported_pcie",
-            "pcie_label",
-            "pcie",
-        ),
-    )
-    if provider_label != "-":
-        return provider_label
     gpu_payload = payload.get("gpu", {})
     gpus = gpu_payload.get("gpus", []) if isinstance(gpu_payload, dict) else []
     for gpu in gpus:
         if not isinstance(gpu, dict):
             continue
-        gen = gpu.get("pcie_link_gen_current")
-        width = gpu.get("pcie_link_width_current")
+        gen = gpu.get("pcie_link_gen_max")
+        width = gpu.get("pcie_link_width_max")
+        if gen is None or width is None:
+            gen = gpu.get("pcie_link_gen_current")
+            width = gpu.get("pcie_link_width_current")
         if gen is not None and width is not None:
             return f"gen{gen} x{width}"
     return "-"
@@ -306,7 +299,7 @@ def _hardware_metadata_field(
 ) -> str:
     if not payload:
         return "-"
-    for section_name in ("manual", "provider_env"):
+    for section_name in ("provider_specs", "manual"):
         section = payload.get(section_name, {})
         if not isinstance(section, dict):
             continue
@@ -314,6 +307,70 @@ def _hardware_metadata_field(
             if key in section:
                 return _format_hardware_value(section.get(key), suffix=suffix)
     return "-"
+
+
+def _hardware_cpu_topology(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    cpu = payload.get("cpu", {})
+    if not isinstance(cpu, dict):
+        return "-"
+    parts = []
+    for key, suffix in (
+        ("socket_count", "S"),
+        ("physical_core_count", "C"),
+        ("logical_count", "T"),
+        ("numa_node_count", "N"),
+    ):
+        value = cpu.get(key)
+        if value is not None:
+            parts.append(f"{value}{suffix}")
+    if cpu.get("l3_cache"):
+        parts.append(f"L3 {cpu['l3_cache']}")
+    return "/".join(parts) if parts else "-"
+
+
+def _hardware_cpu_allocation(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    cpu = payload.get("cpu", {})
+    if not isinstance(cpu, dict):
+        return "-"
+    effective = cpu.get("effective_logical_count")
+    quota = cpu.get("quota_cores")
+    if effective is None and quota is None:
+        return "-"
+    if quota is None:
+        return f"{effective} affinity"
+    if effective is None:
+        return f"quota {float(quota):g}"
+    return f"{effective} affinity / {float(quota):g} quota"
+
+
+def _hardware_gpu_power(payload: dict[str, Any] | None) -> str:
+    value = _hardware_first_gpu_field(payload, "power_limit_w")
+    if value == "-":
+        return value
+    try:
+        return f"{float(value):g} W"
+    except ValueError:
+        return value
+
+
+def _hardware_torch_version(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    torch_payload = payload.get("torch", {})
+    version = torch_payload.get("version") if isinstance(torch_payload, dict) else None
+    return str(version) if version else "-"
+
+
+def _hardware_python_version(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "-"
+    python_payload = payload.get("python", {})
+    version = python_payload.get("version") if isinstance(python_payload, dict) else None
+    return str(version) if version else "-"
 
 
 def table_hardware_results(
@@ -347,15 +404,19 @@ def table_hardware_results(
                     "gpu_fp16_tflops",
                 ),
             ),
+            "gpu power": _hardware_gpu_power(payload),
+            "pcie": _hardware_pcie_label(payload),
             "cpu": payload.get("cpu", {}).get("model", "-") if payload else "-",
-            "cpu count": payload.get("cpu", {}).get("logical_count", "-") if payload else "-",
+            "cpu topology": _hardware_cpu_topology(payload),
+            "cpu allocation": _hardware_cpu_allocation(payload),
             "ram": (
                 f"{payload.get('memory', {}).get('memtotal_gb'):.1f} GB"
                 if payload and payload.get("memory", {}).get("memtotal_gb") is not None
                 else "-"
             ),
-            "pcie": _hardware_pcie_label(payload),
             "driver": _hardware_first_gpu_field(payload, "driver_version"),
+            "torch": _hardware_torch_version(payload),
+            "python": _hardware_python_version(payload),
             "dlperf": _hardware_metadata_field(
                 payload,
                 (

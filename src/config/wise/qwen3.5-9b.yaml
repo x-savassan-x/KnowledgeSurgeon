@@ -1,5 +1,6 @@
 alg_name: WISE
 model_config: ../base/qwen3.5-9b.yaml
+loc_data_path: src/editors/wise/loc_data.json
 
 mask_ratio: 0.2
 edit_lr: 1.0

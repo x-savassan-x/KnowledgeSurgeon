@@ -1,5 +1,6 @@
 alg_name: WISE
 model_config: ../base/llama3.1-8b.yaml
+loc_data_path: src/editors/wise/loc_data.json
 
 mask_ratio: 0.2
 edit_lr: 0.9

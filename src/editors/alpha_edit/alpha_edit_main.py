@@ -1,5 +1,4 @@
 from copy import deepcopy
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -25,16 +24,6 @@ cache_c_new = False
 cache_c_key = None
 
 
-@dataclass
-class AlphaEditCacheState:
-    matrix: torch.Tensor | None = None
-    key: tuple | None = None
-
-    def reset(self) -> None:
-        self.matrix = None
-        self.key = None
-
-
 def load_AlphaEdit_projector(hparams) -> torch.Tensor:
     """Load the configured projector once and return its CPU tensor."""
     global P, P_loaded_path
@@ -52,18 +41,6 @@ def load_AlphaEdit_projector(hparams) -> torch.Tensor:
     return P
 
 
-def release_AlphaEdit_projector(projector_path: str | Path | None = None) -> bool:
-    """Release the process-wide projector when it matches the requested asset."""
-    global P, P_loaded_path
-
-    if projector_path is not None and P_loaded_path is not None:
-        if Path(projector_path).resolve() != P_loaded_path:
-            return False
-    P = None
-    P_loaded_path = None
-    return True
-
-
 def _alpha_edit_cache_key(hparams) -> tuple:
     return (
         hparams.model_key,
@@ -75,25 +52,10 @@ def _alpha_edit_cache_key(hparams) -> tuple:
 def _resolve_cache_matrix(
     model: AutoModelForCausalLM,
     hparams,
-    cache_state: AlphaEditCacheState | None,
 ) -> torch.Tensor:
     global cache_c, cache_c_new, cache_c_key
 
     current_key = _alpha_edit_cache_key(hparams)
-    if cache_state is not None:
-        if cache_state.matrix is None or cache_state.key != current_key:
-            output_weight = nethook.get_parameter(
-                model,
-                f"{hparams.rewrite_module_tmp.format(hparams.layers[-1])}.weight",
-            )
-            input_size = output_weight.shape[1]
-            cache_state.matrix = torch.zeros(
-                (len(hparams.layers), input_size, input_size),
-                device="cpu",
-            )
-            cache_state.key = current_key
-        return cache_state.matrix
-
     if cache_c is None or not cache_c_new or cache_c_key != current_key:
         output_weight = nethook.get_parameter(
             model,
@@ -109,64 +71,6 @@ def _resolve_cache_matrix(
     return cache_c
 
 
-def _validate_cache_factors(
-    cache_matrix: torch.Tensor,
-    factors: list[torch.Tensor],
-) -> list[torch.Tensor]:
-    if cache_matrix.ndim != 3 or cache_matrix.shape[1] != cache_matrix.shape[2]:
-        raise ValueError("AlphaEdit cache must contain square matrices per layer.")
-    if len(factors) != cache_matrix.shape[0]:
-        raise ValueError("AlphaEdit cache factor count does not match configured layers.")
-
-    input_size = cache_matrix.shape[1]
-    prepared_factors: list[torch.Tensor] = []
-    for layer_index, factor in enumerate(factors):
-        if factor.ndim != 2 or factor.shape[0] != input_size:
-            raise ValueError(
-                "AlphaEdit cache factor has the wrong shape at layer index "
-                f"{layer_index}: expected ({input_size}, n), got {tuple(factor.shape)}."
-            )
-        prepared = factor.detach().to(device="cpu", dtype=torch.float32)
-        if not torch.isfinite(prepared).all():
-            raise ValueError(
-                f"AlphaEdit cache factor contains non-finite values at layer index {layer_index}."
-            )
-        prepared_factors.append(prepared)
-    return prepared_factors
-
-
-def _commit_cache_factors(
-    cache_matrix: torch.Tensor,
-    factors: list[torch.Tensor],
-) -> None:
-    prepared_factors = _validate_cache_factors(cache_matrix, factors)
-    for layer_index, factor in enumerate(prepared_factors):
-        cache_matrix[layer_index].addmm_(factor, factor.T)
-
-
-def commit_AlphaEdit_cache_factors(
-    cache_state: AlphaEditCacheState,
-    factors: list[torch.Tensor],
-) -> None:
-    if cache_state.matrix is None:
-        raise RuntimeError("AlphaEdit cache is not initialized.")
-    _commit_cache_factors(cache_state.matrix, factors)
-
-
-def restore_AlphaEdit_weights(
-    model: AutoModelForCausalLM,
-    weights: dict[str, torch.Tensor],
-) -> None:
-    """Restore only the parameters changed by an AlphaEdit proposal."""
-    params = dict(model.named_parameters())
-    missing = sorted(set(weights).difference(params))
-    if missing:
-        raise KeyError(f"AlphaEdit restore weights are missing from the model: {missing}")
-    with torch.no_grad():
-        for name, value in weights.items():
-            copy_to_param(params[name], value)
-
-
 def apply_AlphaEdit_to_model(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
@@ -177,43 +81,16 @@ def apply_AlphaEdit_to_model(
     cache_template: Optional[str] = None,
     keep_original_weight: bool = False,
     reset_cache: bool = False,
-    cache_state: AlphaEditCacheState | None = None,
-    defer_cache_commit: bool = False,
-    return_cache_factors: bool = False,
-    orig_weights_device: torch.device | str = "cpu",
     **kwargs,
-) -> (
-    tuple[AutoModelForCausalLM, dict[str, torch.Tensor]]
-    | tuple[
-        AutoModelForCausalLM,
-        dict[str, torch.Tensor],
-        list[torch.Tensor],
-    ]
-):
-    """
-    Apply an AlphaEdit update and optionally defer its cumulative-cache commit.
-
-    When ``defer_cache_commit`` is true, the model receives the candidate update
-    while the supplied cache state remains unchanged. Set
-    ``return_cache_factors`` to receive the compact factors required by
-    :func:`commit_AlphaEdit_cache_factors` after external validation. Original
-    changed weights are copied to CPU by default for exact rollback without
-    retaining a second copy on the GPU.
-    """
+) -> tuple[AutoModelForCausalLM, dict[str, torch.Tensor]]:
+    """Apply an AlphaEdit update and return optional reset weights."""
 
     global cache_c, cache_c_key, cache_c_new
 
-    if return_cache_factors and not defer_cache_commit:
-        raise ValueError("return_cache_factors requires defer_cache_commit=True.")
-
-    # Reset cache if requested
     if reset_cache:
-        if cache_state is None:
-            cache_c = None
-            cache_c_new = False
-            cache_c_key = None
-        else:
-            cache_state.reset()
+        cache_c = None
+        cache_c_new = False
+        cache_c_key = None
 
     weights_copy = {}
     if copy:
@@ -221,50 +98,26 @@ def apply_AlphaEdit_to_model(
 
     load_AlphaEdit_projector(hparams)
 
-    cache_matrix = _resolve_cache_matrix(model, hparams, cache_state)
-    # Always defer the cache mutation until all model updates have been applied.
-    # Transactional callers receive the factors and commit them after validation.
-    deltas, cache_factors = execute_AlphaEdit(
+    cache_matrix = _resolve_cache_matrix(model, hparams)
+    deltas = execute_AlphaEdit(
         model,
         tok,
         requests,
         hparams,
         cache_template=cache_template,
         cache_matrix=cache_matrix,
-        defer_cache_commit=True,
     )
 
-    prepared_updates: list[tuple[str, torch.nn.Parameter, torch.Tensor]] = []
-    for weight_name, update in deltas.items():
-        weight = nethook.get_parameter(model, weight_name)
-        update = upd_matrix_match_shape(update, weight.shape)
-        if not torch.isfinite(update).all():
-            raise ValueError(f"AlphaEdit produced a non-finite update for {weight_name}.")
-        prepared_updates.append((weight_name, weight, update))
-
-        if return_orig_weights:
-            weights_copy[weight_name] = weight.detach().to(
-                device=orig_weights_device,
-                copy=True,
-            )
-
-    try:
-        with torch.no_grad():
-            for _, weight, update in prepared_updates:
-                update = to_param_device(update, weight, dtype=weight.dtype)
-                weight.add_(update)
-
-        if not defer_cache_commit:
-            _commit_cache_factors(cache_matrix, cache_factors)
-    except Exception:
-        if weights_copy:
-            restore_AlphaEdit_weights(model, weights_copy)
-        raise
+    with torch.no_grad():
+        for weight_name, update in deltas.items():
+            weight = nethook.get_parameter(model, weight_name)
+            update = upd_matrix_match_shape(update, weight.shape)
+            if return_orig_weights:
+                weights_copy[weight_name] = weight.detach().clone()
+            weight.add_(to_param_device(update, weight, dtype=weight.dtype))
 
     # print(f"New weights successfully inserted into {list(deltas.keys())}")
 
-    if defer_cache_commit and return_cache_factors:
-        return model, weights_copy, cache_factors
     return model, weights_copy
 
 
@@ -275,21 +128,16 @@ def execute_AlphaEdit(
     hparams,
     cache_template: Optional[str] = None,
     cache_matrix: torch.Tensor | None = None,
-    defer_cache_commit: bool = False,
-) -> (
-    dict[str, torch.Tensor]
-    | tuple[dict[str, torch.Tensor], list[torch.Tensor]]
-):
+) -> dict[str, torch.Tensor]:
     """
     Executes the AlphaEdit update algorithm for the specified update at the specified layer
     Invariant: model at beginning of function == model at end of function
     """
 
     if cache_matrix is None:
-        cache_matrix = _resolve_cache_matrix(model, hparams, None)
+        cache_matrix = _resolve_cache_matrix(model, hparams)
 
     deltas = {}
-    cache_factors: list[torch.Tensor] = []
 
     # Update target and print info
     requests = deepcopy(requests)
@@ -318,8 +166,7 @@ def execute_AlphaEdit(
 
     # Save old weights for future restoration
     weights_copy = {
-        name: weight.detach().to(device="cpu", copy=True)
-        for name, weight in weights.items()
+        name: weight.detach().clone() for name, weight in weights.items()
     }
 
     try:
@@ -437,10 +284,7 @@ def execute_AlphaEdit(
                 layer,
                 context_templates,
             ).T.float().cpu()
-            cache_factors.append(layer_ks)
-
-        if not defer_cache_commit:
-            _commit_cache_factors(cache_matrix, cache_factors)
+            cache_matrix[i].addmm_(layer_ks, layer_ks.T)
     finally:
         with torch.no_grad():
             for name, weight in weights.items():
@@ -448,8 +292,6 @@ def execute_AlphaEdit(
 
     # print(f"Deltas successfully computed for {list(weights.keys())}")
 
-    if defer_cache_commit:
-        return deltas, cache_factors
     return deltas
 
 

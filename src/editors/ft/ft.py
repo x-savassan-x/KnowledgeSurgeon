@@ -17,20 +17,18 @@ class FT(Editor):
     def edit(self, request: EditRequest) -> None:
         ee_request = [{
             "prompt": request.prompt,
-            "target_new": request.new_ground_truth,
-            "target_true": request.old_ground_truth,
+            "target_new": request.answer,
         }]
+        need_reset_copy = not self._initial_weights
         _, weights_copy = apply_ft_to_model(
             self.model,
             self.tokenizer,
             ee_request,
             self.config,
-            return_orig_weights=True,
+            return_orig_weights=need_reset_copy,
         )
-        if not self._initial_weights:
-            self._initial_weights = {
-                k: v.detach().clone() for k, v in weights_copy.items()
-            }
+        if need_reset_copy:
+            self._initial_weights = weights_copy
 
     def reset(self) -> None:
         if not self._initial_weights:
@@ -39,3 +37,4 @@ class FT(Editor):
         with torch.no_grad():
             for name, weight in self._initial_weights.items():
                 params[name][...] = weight.clone()
+        self._initial_weights = {}

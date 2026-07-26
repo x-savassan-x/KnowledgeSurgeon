@@ -28,29 +28,28 @@ for name, shapes in rows:
 """
 @dataclass
 class Config:
-    # Name of the editing algorithm
+    # Name used to select the editing algorithm.
     alg_name: str
 
-    # HuggingFace model ID or local path to the model directory
+    # Hugging Face model ID or local model directory.
     model_name: str
 
-    # Stable project slug used for model-specific assets and evaluation paths.
+    # Stable slug used for model-specific assets and evaluation paths.
     model_key: str
 
-    # CUDA device index to load the model on
+    # CUDA device index used by the editor and model.
     gpu_id: int
 
-    # Materialized device used everywhere in code after config loading.
-    # For current single-GPU workflow, this is always cuda:{gpu_id}.
+    # Runtime device derived from gpu_id after configuration loading.
     device: torch.device = field(init=False)
 
-    # When True, load model in bfloat16 instead of float32
+    # Load model weights in bfloat16 instead of float32.
     fp16: bool
 
-    # When True, load large models sharded across visible GPUs via HF device_map.
+    # Shard the model across visible GPUs through the Hugging Face device map.
     model_parallel: bool = False
 
-    # Model-specific limits for activation statistics used by ROME-family methods.
+    # Optional token limit for activation statistics used by ROME-family methods.
     layer_stats_max_length: int | None = None
 
     def __post_init__(self) -> None:
