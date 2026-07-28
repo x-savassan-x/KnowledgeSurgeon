@@ -43,12 +43,25 @@ router:
   max_length: 384
   batch_size: 32
   gate: score_margin
-  hybrid:
-    score_threshold: 0.5810490846633911
-    margin_threshold: 0.06471586972475052
-  external_only:
-    score_threshold: 0.6538538336753845
-    margin_threshold: 0.09644604474306107
+  thresholds:
+    - max_bank_size: 100
+      score_threshold: 0.5810490846633911
+      margin_threshold: 0.06471586972475052
+    - max_bank_size: 1000
+      score_threshold: 0.6295567154884338
+      margin_threshold: 0.10444606095552444
+    - max_bank_size: 2000
+      score_threshold: 0.6295567750930786
+      margin_threshold: 0.10083300620317459
+    - max_bank_size: 5000
+      score_threshold: 0.6269395351409912
+      margin_threshold: 0.11267424374818802
+    - max_bank_size: 10000
+      score_threshold: 0.6538538336753845
+      margin_threshold: 0.08016670495271683
+    - max_bank_size: null
+      score_threshold: 0.6538538336753845
+      margin_threshold: 0.09644604474306107
 
 delta:
   num_steps: 50

@@ -64,9 +64,9 @@ class Mnemo(Editor):
             router_device = (
                 f"cuda:{config.gpu_id}" if torch.cuda.is_available() else "cpu"
             )
-        score_threshold, margin_threshold = router_config.thresholds_for(
-            config.external_only
-        )
+        routing_profile = router_config.profile_for(0)
+        score_threshold = routing_profile.score_threshold
+        margin_threshold = routing_profile.margin_threshold
         self.router = build_router(
             backend=router_config.backend,
             score_threshold=score_threshold,
@@ -101,6 +101,7 @@ class Mnemo(Editor):
         self._consolidation_count = 0
         self._consolidated_edit_count = 0
         self._external_only = config.external_only
+        self._routing_profile_max_size = routing_profile.max_bank_size
         self._closed = True
         self._original_canary_logits: torch.Tensor | None = None
         self._canary_target_ids: torch.Tensor | None = None
@@ -123,6 +124,7 @@ class Mnemo(Editor):
             value,
             request=request,
         )
+        self._refresh_routing_thresholds()
         self.last_delta_loss = loss
         self.last_delta_norm = delta_norm
         max_norm = self.config.delta_config.max_norm
@@ -163,7 +165,7 @@ class Mnemo(Editor):
         self._consolidation_count = 0
         self._consolidated_edit_count = 0
         self._external_only = self.config.external_only
-        self._set_routing_mode(self._external_only)
+        self._refresh_routing_thresholds(force=True)
         self._original_canary_logits = None
         self._canary_target_ids = None
         self.last_delta_loss = None
@@ -457,12 +459,19 @@ class Mnemo(Editor):
             raise AttributeError("The language model config has no hidden_size.")
         return int(hidden_size)
 
-    def _set_routing_mode(self, external_only: bool) -> None:
-        score_threshold, margin_threshold = (
-            self.config.router_config.thresholds_for(external_only)
+    def _refresh_routing_thresholds(self, *, force: bool = False) -> None:
+        profile = self.config.router_config.profile_for(self.external_memory_size)
+        if not force and profile.max_bank_size == self._routing_profile_max_size:
+            return
+        self.router.set_thresholds(
+            profile.score_threshold,
+            profile.margin_threshold,
         )
-        self.router.set_thresholds(score_threshold, margin_threshold)
-        self.storage.set_thresholds(score_threshold, margin_threshold)
+        self.storage.set_thresholds(
+            profile.score_threshold,
+            profile.margin_threshold,
+        )
+        self._routing_profile_max_size = profile.max_bank_size
 
     def _proposal_numerical_guard(
         self,
@@ -742,6 +751,7 @@ class Mnemo(Editor):
         for request in requests:
             self._add_retention_request(request)
         self.storage.clear()
+        self._refresh_routing_thresholds()
         self._consolidation_count += 1
         self._consolidated_edit_count += len(requests)
         report = {
@@ -776,7 +786,7 @@ class Mnemo(Editor):
         result: ConsolidationSafetyResult | None = None,
     ) -> None:
         self._external_only = True
-        self._set_routing_mode(True)
+        self._refresh_routing_thresholds(force=True)
         report = {
             "safe": False,
             "cycle": self._consolidation_count + 1,
@@ -816,7 +826,7 @@ class Mnemo(Editor):
         target._base_model.load_state_dict(self._base_model.state_dict(), strict=True)
         target.storage.load_state(self.storage.copy_state())
         target._external_only = self._external_only
-        target._set_routing_mode(target._external_only)
+        target._refresh_routing_thresholds(force=True)
         if target._external_only:
             # Generation-only copies must not retain Mnemo's consolidation snapshots
             # or safety reservoir after the source has switched to external memory.

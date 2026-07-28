@@ -40,6 +40,9 @@ class MnemoDiagnosticsConfig:
 
 @dataclass
 class MnemoRouterThresholdConfig:
+    # Largest active memory bank covered by this calibration; null is the fallback.
+    max_bank_size: int | None
+
     # Minimum top-1 cosine similarity required to activate retrieval.
     score_threshold: float
 
@@ -47,6 +50,13 @@ class MnemoRouterThresholdConfig:
     margin_threshold: float
 
     def __post_init__(self) -> None:
+        if self.max_bank_size is not None:
+            if isinstance(self.max_bank_size, bool) or not isinstance(
+                self.max_bank_size, int
+            ):
+                raise TypeError("Mnemo router max_bank_size must be an integer or null.")
+            if self.max_bank_size <= 0:
+                raise ValueError("Mnemo router max_bank_size must be positive.")
         if not -1.0 <= self.score_threshold <= 1.0:
             raise ValueError("Mnemo router score_threshold must be in [-1, 1].")
         if not 0.0 <= self.margin_threshold <= 2.0:
@@ -79,24 +89,43 @@ class MnemoRouterConfig:
     # Retrieval gate applied to the nearest-neighbor scores.
     gate: str = "score_margin"
 
-    # Hybrid thresholds calibrated from pooled FP16 BGE-M3 scores at 1% locality FAR.
-    hybrid: dict[str, float] | MnemoRouterThresholdConfig = field(
-        default_factory=lambda: {
-            "score_threshold": 0.5810490846633911,
-            "margin_threshold": 0.06471586972475052,
-        }
+    # Capacity-dependent calibrations from pooled FP16 BGE-M3 scores at 1% locality FAR.
+    thresholds: list[dict[str, float | int | None] | MnemoRouterThresholdConfig] = field(
+        default_factory=lambda: [
+            {
+                "max_bank_size": 100,
+                "score_threshold": 0.5810490846633911,
+                "margin_threshold": 0.06471586972475052,
+            },
+            {
+                "max_bank_size": 1_000,
+                "score_threshold": 0.6295567154884338,
+                "margin_threshold": 0.10444606095552444,
+            },
+            {
+                "max_bank_size": 2_000,
+                "score_threshold": 0.6295567750930786,
+                "margin_threshold": 0.10083300620317459,
+            },
+            {
+                "max_bank_size": 5_000,
+                "score_threshold": 0.6269395351409912,
+                "margin_threshold": 0.11267424374818802,
+            },
+            {
+                "max_bank_size": 10_000,
+                "score_threshold": 0.6538538336753845,
+                "margin_threshold": 0.08016670495271683,
+            },
+            {
+                "max_bank_size": None,
+                "score_threshold": 0.6538538336753845,
+                "margin_threshold": 0.09644604474306107,
+            },
+        ]
     )
 
-    # External-only thresholds from the same pooled FP16 BGE-M3 calibration.
-    external_only: dict[str, float] | MnemoRouterThresholdConfig = field(
-        default_factory=lambda: {
-            "score_threshold": 0.6538538336753845,
-            "margin_threshold": 0.09644604474306107,
-        }
-    )
-
-    hybrid_config: MnemoRouterThresholdConfig = field(init=False)
-    external_only_config: MnemoRouterThresholdConfig = field(init=False)
+    threshold_configs: tuple[MnemoRouterThresholdConfig, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         if not self.backend:
@@ -115,12 +144,32 @@ class MnemoRouterConfig:
             raise ValueError("Mnemo router batch_size must be positive.")
         if self.gate != "score_margin":
             raise ValueError("Mnemo currently supports only the score_margin router gate.")
-        self.hybrid_config = self._coerce_thresholds(self.hybrid)
-        self.external_only_config = self._coerce_thresholds(self.external_only)
+        if not self.thresholds:
+            raise ValueError("Mnemo router thresholds must not be empty.")
+        profiles = tuple(self._coerce_thresholds(config) for config in self.thresholds)
+        bounded_sizes = [
+            profile.max_bank_size
+            for profile in profiles
+            if profile.max_bank_size is not None
+        ]
+        if bounded_sizes != sorted(set(bounded_sizes)):
+            raise ValueError(
+                "Mnemo router bounded max_bank_size values must be unique and increasing."
+            )
+        fallback_indices = [
+            index
+            for index, profile in enumerate(profiles)
+            if profile.max_bank_size is None
+        ]
+        if fallback_indices != [len(profiles) - 1]:
+            raise ValueError(
+                "Mnemo router thresholds require one null max_bank_size fallback last."
+            )
+        self.threshold_configs = profiles
 
     @staticmethod
     def _coerce_thresholds(
-        config: dict[str, float] | MnemoRouterThresholdConfig,
+        config: dict[str, float | int | None] | MnemoRouterThresholdConfig,
     ) -> MnemoRouterThresholdConfig:
         if isinstance(config, MnemoRouterThresholdConfig):
             return config
@@ -128,9 +177,16 @@ class MnemoRouterConfig:
             raise TypeError("Mnemo router thresholds must be a mapping.")
         return MnemoRouterThresholdConfig(**config)
 
-    def thresholds_for(self, external_only: bool) -> tuple[float, float]:
-        config = self.external_only_config if external_only else self.hybrid_config
-        return config.score_threshold, config.margin_threshold
+    def profile_for(self, bank_size: int) -> MnemoRouterThresholdConfig:
+        if isinstance(bank_size, bool) or not isinstance(bank_size, int):
+            raise TypeError("Mnemo router bank_size must be an integer.")
+        if bank_size < 0:
+            raise ValueError("Mnemo router bank_size must be nonnegative.")
+        return next(
+            profile
+            for profile in self.threshold_configs
+            if profile.max_bank_size is None or bank_size <= profile.max_bank_size
+        )
 
 
 @dataclass
