@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import asdict
 import gc
 import json
@@ -125,7 +127,7 @@ class Mnemo(Editor):
         self.last_delta_norm = delta_norm
         max_norm = self.config.delta_config.max_norm
         self.last_delta_saturated = self.last_delta_norm >= max_norm * (1.0 - 1.0e-4)
-        if self.config.diagnostics:
+        if self.config.diagnostics_config.delta_enabled:
             print(
                 "[mnemo-edit] "
                 + json.dumps(
@@ -191,6 +193,20 @@ class Mnemo(Editor):
     @property
     def external_memory_size(self) -> int:
         return len(self.storage)
+
+    @contextmanager
+    def force_patch(
+        self,
+        patch_indices: int | Sequence[int],
+        *,
+        strength: float | None = None,
+    ):
+        """Temporarily bypass Mnemo routing for diagnostic intervention tests."""
+        self._install_runtime()
+        if not isinstance(self.model, PrefillRoutingModel):
+            raise RuntimeError("Mnemo runtime does not expose forced patch routing")
+        with self.model.force_patch(patch_indices, strength=strength):
+            yield
 
     def consolidate(self) -> bool:
         if self._external_only or not len(self.storage):
@@ -271,7 +287,8 @@ class Mnemo(Editor):
             self.router,
             self._interceptor,
             storage=self.storage,
-            diagnostics=self.config.diagnostics,
+            router_diagnostics=self.config.diagnostics_config.router_enabled,
+            interceptor_diagnostics=self.config.diagnostics_config.interceptor_enabled,
             intervention_strength=self.config.intervention_strength,
         )
         self._closed = False

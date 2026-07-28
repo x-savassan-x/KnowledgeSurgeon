@@ -6,7 +6,7 @@ from typing import Any
 
 
 EVALUATION_DIR = Path(__file__).resolve().parents[2] / "data" / "evaluation"
-RESULT_GROUPS = {"perf", "unscored", "scored", "time", "mem"}
+RESULT_GROUPS = {"perf", "unscored", "scored", "time", "mem", "hardware"}
 
 
 def _normalize_milestones(milestones: list[int]) -> list[int]:
@@ -71,7 +71,9 @@ def build_experiment_dir(
 
 def build_hardware_path(
     model_key: str,
+    editing_method: str,
     milestones: list[int],
+    result_name: str,
     run_index: int,
     n_runs: int,
     judge_repeats: int,
@@ -79,16 +81,19 @@ def build_hardware_path(
 ) -> Path:
     if run_index <= 0:
         raise ValueError("run_index must be > 0")
+    if not result_name:
+        raise ValueError("result_name must not be empty")
     return (
-        build_experiment_dir(
+        build_method_dir(
             model_key=model_key,
+            editing_method=editing_method,
             milestones=milestones,
             n_runs=n_runs,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
         )
         / "hardware"
-        / f"run_{run_index}.json"
+        / f"{result_name}_{run_index}.json"
     )
 
 
@@ -105,8 +110,9 @@ def build_result_path(
 ) -> Path:
     if run_index <= 0:
         raise ValueError("run_index must be > 0")
-    if result_group not in RESULT_GROUPS:
-        raise ValueError(f"result_group must be one of: {', '.join(sorted(RESULT_GROUPS))}")
+    standard_groups = RESULT_GROUPS - {"hardware"}
+    if result_group not in standard_groups:
+        raise ValueError(f"result_group must be one of: {', '.join(sorted(standard_groups))}")
     method_dir = build_method_dir(
         model_key=model_key,
         editing_method=editing_method,
@@ -305,7 +311,9 @@ def save_memory_results(
 def save_hardware_results(
     hardware: dict[str, Any],
     model_key: str,
+    editing_method: str,
     milestones: list[int],
+    result_name: str,
     run_index: int,
     n_runs: int,
     judge_repeats: int,
@@ -313,7 +321,9 @@ def save_hardware_results(
 ) -> Path:
     path = build_hardware_path(
         model_key=model_key,
+        editing_method=editing_method,
         milestones=milestones,
+        result_name=result_name,
         run_index=run_index,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -335,7 +345,9 @@ def save_hardware_results(
 
 def load_hardware_results(
     model_key: str,
+    editing_method: str,
     milestones: list[int],
+    result_name: str,
     run_index: int,
     n_runs: int,
     judge_repeats: int,
@@ -343,7 +355,9 @@ def load_hardware_results(
 ) -> dict[str, Any] | None:
     path = build_hardware_path(
         model_key=model_key,
+        editing_method=editing_method,
         milestones=milestones,
+        result_name=result_name,
         run_index=run_index,
         n_runs=n_runs,
         judge_repeats=judge_repeats,
@@ -376,44 +390,6 @@ def load_result_file(
         return None
 
     parts = relative.parts
-    if len(parts) == 5:
-        model_key, milestones_str, run_setting, result_group, filename = parts
-        if result_group != "hardware" or not filename.endswith(".json"):
-            return None
-
-        try:
-            milestones = [int(step) for step in milestones_str.split("-")]
-            milestones = _normalize_milestones(milestones)
-        except ValueError:
-            return None
-
-        match = re.fullmatch(r"r(\d+)-j(\d+)", run_setting)
-        if match is None:
-            return None
-        n_runs = int(match.group(1))
-        judge_repeats = int(match.group(2))
-
-        stem = filename[:-5]
-        match = re.fullmatch(r"run_(\d+)", stem)
-        if match is None:
-            return None
-        run_index = int(match.group(1))
-
-        with open(path, encoding="utf-8") as file:
-            payload = json.load(file)
-
-        meta = {
-            "model_key": model_key,
-            "method": None,
-            "milestones": milestones,
-            "n_runs": n_runs,
-            "judge_repeats": judge_repeats,
-            "result_group": result_group,
-            "result_name": "hardware",
-            "run_index": run_index,
-        }
-        return meta, payload
-
     if len(parts) != 6:
         return None
 
@@ -444,6 +420,12 @@ def load_result_file(
         result_name = parts[0]
         run_index = int(parts[1])
         step = int(parts[2])
+    elif result_group == "hardware":
+        match = re.fullmatch(r"(.+)_(\d+)", stem)
+        if match is None:
+            return None
+        result_name = match.group(1)
+        run_index = int(match.group(2))
     else:
         result_name = stem
         run_index = None

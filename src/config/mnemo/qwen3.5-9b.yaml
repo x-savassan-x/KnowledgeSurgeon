@@ -22,7 +22,12 @@ consolidation:
   L2: 1
   P_loc: data/assets/alpha_edit_projectors/qwen3.5-9b/null_space_project.pt
 
-diagnostics: false
+diagnostics:
+  all: null
+  delta: false
+  router: false
+  interceptor: false
+
 consolidation_cycle: 100
 external_only: false
 intervention_block: 18

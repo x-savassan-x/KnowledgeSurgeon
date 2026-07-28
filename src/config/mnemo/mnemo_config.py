@@ -5,6 +5,40 @@ from ..config import Config, resolve_project_path
 
 
 @dataclass
+class MnemoDiagnosticsConfig:
+    # Global override; null delegates control to the component switches.
+    all: bool | None = None
+
+    # Report intervention-vector loss, norm, and saturation after each edit.
+    delta: bool = False
+
+    # Report retrieval scores, gates, selected memory rows, and route outcomes.
+    router: bool = False
+
+    # Report whether the decoder-block hook observed and modified each batch row.
+    interceptor: bool = False
+
+    def __post_init__(self) -> None:
+        if self.all is not None and not isinstance(self.all, bool):
+            raise TypeError("Mnemo diagnostics all must be a boolean or null.")
+        for name in ("delta", "router", "interceptor"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"Mnemo diagnostics {name} must be a boolean.")
+
+    @property
+    def delta_enabled(self) -> bool:
+        return self.delta if self.all is None else self.all
+
+    @property
+    def router_enabled(self) -> bool:
+        return self.router if self.all is None else self.all
+
+    @property
+    def interceptor_enabled(self) -> bool:
+        return self.interceptor if self.all is None else self.all
+
+
+@dataclass
 class MnemoRouterThresholdConfig:
     # Minimum top-1 cosine similarity required to activate retrieval.
     score_threshold: float
@@ -415,8 +449,10 @@ class MnemoConfig(Config):
     # Disable consolidation and use external memory from initialization.
     external_only: bool = False
 
-    # Emit detailed edit and routing decisions for debugging.
-    diagnostics: bool = False
+    # Component diagnostics with an optional all-on/all-off override.
+    diagnostics: dict[str, bool | None] | MnemoDiagnosticsConfig = field(
+        default_factory=dict
+    )
 
     # Decoder block index where retrieved interventions are applied.
     intervention_block: int = 18
@@ -445,6 +481,7 @@ class MnemoConfig(Config):
     router_config: MnemoRouterConfig = field(init=False)
     delta_config: MnemoDeltaConfig = field(init=False)
     safety_config: MnemoSafetyConfig = field(init=False)
+    diagnostics_config: MnemoDiagnosticsConfig = field(init=False)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -452,8 +489,6 @@ class MnemoConfig(Config):
             raise ValueError("Mnemo consolidation_cycle must be positive.")
         if not isinstance(self.external_only, bool):
             raise TypeError("Mnemo external_only must be a boolean.")
-        if not isinstance(self.diagnostics, bool):
-            raise TypeError("Mnemo diagnostics must be a boolean.")
         if self.intervention_block < 0:
             raise ValueError("Mnemo intervention_block must be nonnegative.")
         if "{}" not in self.intervention_module_tmp:
@@ -469,6 +504,17 @@ class MnemoConfig(Config):
         self.router_config = self._coerce_router_config(self.router)
         self.delta_config = self._coerce_delta_config(self.delta)
         self.safety_config = self._coerce_safety_config(self.safety)
+        self.diagnostics_config = self._coerce_diagnostics_config(self.diagnostics)
+
+    @staticmethod
+    def _coerce_diagnostics_config(
+        config: dict[str, bool | None] | MnemoDiagnosticsConfig,
+    ) -> MnemoDiagnosticsConfig:
+        if isinstance(config, MnemoDiagnosticsConfig):
+            return config
+        if not isinstance(config, dict):
+            raise TypeError("Mnemo diagnostics configuration must be a mapping.")
+        return MnemoDiagnosticsConfig(**config)
 
     @staticmethod
     def _coerce_router_config(

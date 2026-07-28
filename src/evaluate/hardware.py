@@ -434,9 +434,7 @@ def _torch_info() -> dict[str, Any]:
     return info
 
 
-def collect_hardware_info(
-    provider_specs: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def collect_hardware_info() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "hostname": socket.gethostname(),
         "os": {
@@ -453,31 +451,26 @@ def collect_hardware_info(
         "gpu": _nvidia_gpu_info(),
         "torch": _torch_info(),
     }
-    if provider_specs:
-        payload["provider_specs"] = {
-            key: value
-            for key, value in provider_specs.items()
-            if value not in (None, "")
-        }
     return payload
 
 
 def save_run_hardware(
     model_key: str,
+    editing_method: str,
     milestones: list[int],
+    result_name: str,
     run_index: int,
     n_runs: int,
     judge_repeats: int,
-    provider_specs: dict[str, Any] | None = None,
     evaluation_dir: Path | str | None = None,
 ) -> Path:
-    hardware = collect_hardware_info(
-        provider_specs=provider_specs,
-    )
+    hardware = collect_hardware_info()
     return save_hardware_results(
         hardware=hardware,
         model_key=model_key,
+        editing_method=editing_method,
         milestones=milestones,
+        result_name=result_name,
         run_index=run_index,
         n_runs=n_runs,
         judge_repeats=judge_repeats,

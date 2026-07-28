@@ -282,33 +282,6 @@ def _hardware_pcie_label(payload: dict[str, Any] | None) -> str:
     return "-"
 
 
-def _format_hardware_value(value, suffix: str = "") -> str:
-    if value in (None, ""):
-        return "-"
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    return f"{number:g}{suffix}"
-
-
-def _hardware_metadata_field(
-    payload: dict[str, Any] | None,
-    keys: tuple[str, ...],
-    suffix: str = "",
-) -> str:
-    if not payload:
-        return "-"
-    for section_name in ("provider_specs", "manual"):
-        section = payload.get(section_name, {})
-        if not isinstance(section, dict):
-            continue
-        for key in keys:
-            if key in section:
-                return _format_hardware_value(section.get(key), suffix=suffix)
-    return "-"
-
-
 def _hardware_cpu_topology(payload: dict[str, Any] | None) -> str:
     if not payload:
         return "-"
@@ -376,58 +349,55 @@ def _hardware_python_version(payload: dict[str, Any] | None) -> str:
 def table_hardware_results(
     model_key: str,
     milestones: list[int],
+    methods: list[str],
+    result_names: list[str],
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     rows: list[dict[str, Any]] = []
-    for run_index in _runs_from_count(n_runs):
-        payload = load_hardware_results(
-            model_key=model_key,
-            milestones=milestones,
-            run_index=run_index,
-            n_runs=n_runs,
-            judge_repeats=judge_repeats,
-            evaluation_dir=evaluation_dir,
-        )
-        rows.append({
-            "gpu": _hardware_gpu_label(payload),
-            "gpu memory": _hardware_gpu_memory(payload),
-            "gpu tflops": _hardware_metadata_field(
-                payload,
-                (
-                    "provider_reported_tflops",
-                    "gpu_tflops",
-                    "tflops",
-                    "fp16_tflops",
-                    "gpu_fp16_tflops",
-                ),
-            ),
-            "gpu power": _hardware_gpu_power(payload),
-            "pcie": _hardware_pcie_label(payload),
-            "cpu": payload.get("cpu", {}).get("model", "-") if payload else "-",
-            "cpu topology": _hardware_cpu_topology(payload),
-            "cpu allocation": _hardware_cpu_allocation(payload),
-            "ram": (
-                f"{payload.get('memory', {}).get('memtotal_gb'):.1f} GB"
-                if payload and payload.get("memory", {}).get("memtotal_gb") is not None
-                else "-"
-            ),
-            "driver": _hardware_first_gpu_field(payload, "driver_version"),
-            "torch": _hardware_torch_version(payload),
-            "python": _hardware_python_version(payload),
-            "dlperf": _hardware_metadata_field(
-                payload,
-                (
-                    "provider_reported_dlperf",
-                    "dlperf",
-                ),
-            ),
-        })
+    for method_name in _edit_methods_only(methods):
+        for result_name in result_names:
+            for run_index in _runs_from_count(n_runs):
+                payload = load_hardware_results(
+                    model_key=model_key,
+                    editing_method=method_name,
+                    milestones=milestones,
+                    result_name=result_name,
+                    run_index=run_index,
+                    n_runs=n_runs,
+                    judge_repeats=judge_repeats,
+                    evaluation_dir=evaluation_dir,
+                )
+                if payload is None:
+                    continue
+                rows.append({
+                    "method": method_name,
+                    "result type": result_name,
+                    "run": run_index,
+                    "gpu": _hardware_gpu_label(payload),
+                    "gpu memory": _hardware_gpu_memory(payload),
+                    "gpu power": _hardware_gpu_power(payload),
+                    "pcie": _hardware_pcie_label(payload),
+                    "cpu": payload.get("cpu", {}).get("model", "-"),
+                    "cpu topology": _hardware_cpu_topology(payload),
+                    "cpu allocation": _hardware_cpu_allocation(payload),
+                    "ram": (
+                        f"{payload.get('memory', {}).get('memtotal_gb'):.1f} GB"
+                        if payload.get("memory", {}).get("memtotal_gb") is not None
+                        else "-"
+                    ),
+                    "driver": _hardware_first_gpu_field(payload, "driver_version"),
+                    "torch": _hardware_torch_version(payload),
+                    "python": _hardware_python_version(payload),
+                })
 
     df = pd.DataFrame(rows)
-    print(f"hardware | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    print(
+        f"hardware | model={model_key} | milestones={milestones} | "
+        f"r{n_runs}-j{judge_repeats} | files={len(rows)}"
+    )
     return _centered_style(df, hide_index=True)
 
 

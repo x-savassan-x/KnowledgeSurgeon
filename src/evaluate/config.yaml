@@ -1,4 +1,4 @@
-# Shared configuration for generation.ipynb, judge.ipynb, and hardware.ipynb.
+# Shared configuration for generation.ipynb and judge.ipynb.
 
 # Selects the base model configuration and evaluation output directory.
 model_key: qwen2.5-7b
