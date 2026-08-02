@@ -1,6 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Union
-
 from ..config import Config, resolve_project_path
 
 
@@ -46,7 +44,7 @@ class WiseConfig(Config):
     replay: bool = False
 
     # Optional interval for saving intermediate editor state.
-    save_freq: Union[int, None] = 500
+    save_freq: int | None = 500
 
     # Algorithm used to merge side-memory weights into the main model.
     merge_alg: str = "ties"
@@ -58,10 +56,10 @@ class WiseConfig(Config):
     inner_params: list[str] = field(default_factory=list)
 
     # Optional weight assigned to each model during merging.
-    weights: Union[float, None] = 1.0
+    weights: float | None = 1.0
 
     # Optional parameter density retained during merging.
-    densities: Union[float, None] = 0.53
+    densities: float | None = 0.53
 
     # Number of edit requests processed together.
     batch_size: int = 1

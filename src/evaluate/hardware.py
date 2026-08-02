@@ -404,36 +404,6 @@ def _nvidia_gpu_info() -> dict[str, Any]:
     }
 
 
-def _torch_info() -> dict[str, Any]:
-    try:
-        import torch
-    except Exception:
-        return {"available": False}
-
-    info: dict[str, Any] = {
-        "available": True,
-        "version": getattr(torch, "__version__", None),
-        "cuda_version": getattr(torch.version, "cuda", None),
-        "cudnn_version": torch.backends.cudnn.version(),
-        "cuda_available": torch.cuda.is_available(),
-    }
-    if torch.cuda.is_available():
-        info["cuda_device_count"] = torch.cuda.device_count()
-        devices = []
-        for idx in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(idx)
-            devices.append({
-                "index": idx,
-                "name": props.name,
-                "total_memory_gb": props.total_memory / 1024**3,
-                "major": props.major,
-                "minor": props.minor,
-                "multi_processor_count": props.multi_processor_count,
-            })
-        info["devices"] = devices
-    return info
-
-
 def collect_hardware_info() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "hostname": socket.gethostname(),
@@ -442,14 +412,10 @@ def collect_hardware_info() -> dict[str, Any]:
             "release": platform.release(),
             "machine": platform.machine(),
         },
-        "python": {
-            "version": platform.python_version(),
-        },
         "cpu": _cpu_info(),
         "memory": _memory_info(),
         "disk": _disk_info(),
         "gpu": _nvidia_gpu_info(),
-        "torch": _torch_info(),
     }
     return payload
 

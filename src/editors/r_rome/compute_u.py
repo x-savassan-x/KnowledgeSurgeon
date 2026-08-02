@@ -1,5 +1,3 @@
-from typing import Dict, List
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -59,10 +57,10 @@ def get_inv_cov(
 def compute_u(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    request: Dict,
+    request: dict,
     hparams,
     layer: int,
-    context_templates: List[str],
+    context_templates: list[str],
 ) -> torch.Tensor:
     # print("Computing left vector (u)...")
 

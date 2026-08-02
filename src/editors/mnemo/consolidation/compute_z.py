@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -11,11 +11,11 @@ from ....utils import repr_tools
 def compute_z(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    request: Dict,
+    request: dict,
     hparams,
     layer: int,
-    context_templates: List[List[str]],
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    context_templates: list[list[str]],
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the value (right) vector for the rank-1 update.
     Runs a simple optimization procedure.
@@ -205,11 +205,11 @@ def get_module_input_output_at_words(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
     layer: int,
-    context_templates: List[str],
-    words: List[str],
+    context_templates: list[str],
+    words: list[str],
     module_template: str,
     fact_token_strategy: str,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Retrieves detached representations for a word at the input and
     output of a particular layer module.

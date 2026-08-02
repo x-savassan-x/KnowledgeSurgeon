@@ -127,6 +127,26 @@ def _adaptive_score_ylim(
     return max(lower_bound, low - pad), min(upper_bound, high + pad)
 
 
+def _adaptive_memory_ylim(
+    values: list[float | None],
+    stds: list[float | None] | None = None,
+    min_span: float = 0.5,
+) -> tuple[float, float]:
+    points = [
+        (float(value), float(std or 0.0))
+        for value, std in zip(values, stds or [None] * len(values))
+        if value is not None
+    ]
+    if not points:
+        return 0.0, 1.0
+
+    low = min(value - std for value, std in points)
+    high = max(value + std for value, std in points)
+    span = max(high - low, min_span)
+    pad = max(span * 0.08, 0.1)
+    return max(0.0, low - pad), high + pad
+
+
 def plot_perf_results(
     model_key: str,
     milestones: list[int],
@@ -486,7 +506,6 @@ def plot_memory_results(
                 values,
                 stds,
                 method_colors[method_name],
-                lower_bound=0.0,
             )
             line_ax.plot(
                 milestone_positions,
@@ -511,14 +530,17 @@ def plot_memory_results(
         _set_milestone_ticks(line_ax, milestones)
         line_ax.set_xlabel("checkpoint")
         line_ax.set_ylabel("GB")
-        line_ax.set_ylim(0, _zero_based_upper(
-            [
-                value
-                for method_name in methods_sorted
-                for value in data[method_name][key]
-            ],
-            min_upper=1.0,
-        ))
+        all_values = [
+            value
+            for method_name in methods_sorted
+            for value in data[method_name][key]
+        ]
+        all_stds = [
+            std
+            for method_name in methods_sorted
+            for std in data[method_name].get(f"{key}_std", [None] * len(milestones))
+        ]
+        line_ax.set_ylim(*_adaptive_memory_ylim(all_values, all_stds))
         line_ax.set_title(f"{label} memory at milestones", fontweight="bold")
         line_ax.grid(alpha=0.25)
 

@@ -1,6 +1,4 @@
 from copy import deepcopy
-from typing import Dict, List, Tuple
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -16,13 +14,13 @@ CONTEXT_TEMPLATES_CACHE = None
 def apply_r_rome_to_model(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    request: List[Dict],
+    request: list[dict],
     hparams,
     copy: bool = False,
     return_orig_weights: bool = False,
     keep_original_weight: bool = False,
     **kwargs,
-) -> Tuple[AutoModelForCausalLM, Dict[str, torch.Tensor]]:
+) -> tuple[AutoModelForCausalLM, dict[str, torch.Tensor]]:
     if not hparams.original_implementation and (
         hparams.enable_prompt_keys == hparams.enable_random_prefix_keys
     ):
@@ -59,9 +57,9 @@ def apply_r_rome_to_model(
 def execute_r_rome(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    request: Dict,
+    request: dict,
     hparams,
-) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
     request = deepcopy(request)
     if request["target_new"] != " ":
         request["target_new"] = " " + request["target_new"]
@@ -145,8 +143,8 @@ def upd_matrix_match_shape(matrix: torch.Tensor, shape: torch.Size) -> torch.Ten
 def get_context_templates(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    length_params: List[Tuple[int, int]],
-) -> List[str]:
+    length_params: list[tuple[int, int]],
+) -> list[str]:
     global CONTEXT_TEMPLATES_CACHE
 
     if CONTEXT_TEMPLATES_CACHE is None:

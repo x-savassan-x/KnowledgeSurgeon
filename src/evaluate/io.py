@@ -336,6 +336,8 @@ def save_hardware_results(
         "captured_at",
         "notes",
         "provider_env",
+        "python",
+        "torch",
     ):
         hardware.pop(key, None)
     _write_json(path, hardware)

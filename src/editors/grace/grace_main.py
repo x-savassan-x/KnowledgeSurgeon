@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from transformers import AutoTokenizer
 
@@ -11,13 +11,13 @@ from .utils import tokenize
 def apply_grace_to_model(
     model,
     tok: AutoTokenizer,
-    requests: List[Dict],
+    requests: list[dict],
     hparams,
     copy: bool = False,
     return_orig_weights: bool = False,
     keep_original_weight: bool = False,
     **kwargs,
-) -> Tuple[GraceCore, Any]:
+) -> tuple[GraceCore, Any]:
     request = requests[0]
     if copy:
         model = deepcopy(model)

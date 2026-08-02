@@ -1,6 +1,4 @@
 from copy import deepcopy
-from typing import Dict, List, Tuple
-
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ...utils.devices import get_model_device
@@ -11,11 +9,11 @@ from .wise_utils import tokenize, get_context_templates
 def apply_wise_to_model(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    requests: List[Dict],
+    requests: list[dict],
     hparams,
     copy: bool = False,
     **kwargs,
-) -> Tuple[WISEModule, dict]:
+) -> tuple[WISEModule, dict]:
     if copy:
         model = deepcopy(model)
 

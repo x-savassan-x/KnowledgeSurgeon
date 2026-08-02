@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -11,11 +11,11 @@ from ...utils import repr_tools
 def compute_v(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    request: Dict,
+    request: dict,
     hparams,
     layer: int,
     left_vector: torch.Tensor,
-    context_templates: List[str],
+    context_templates: list[str],
 ) -> torch.Tensor:
     # print("Computing right vector (v)")
     input_device = get_model_device(model, fallback=hparams.device)
@@ -200,7 +200,7 @@ def get_module_input_output_at_word(
     word: str,
     module_template: str,
     fact_token_strategy: str,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     word_repr_args = dict(
         model=model,
         tok=tok,

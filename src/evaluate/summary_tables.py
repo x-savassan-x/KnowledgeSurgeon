@@ -215,44 +215,6 @@ def _edit_methods_only(methods: list[str]) -> list[str]:
     return [method_name for method_name in methods if method_name != "base"]
 
 
-def _hardware_gpu_label(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    gpu_payload = payload.get("gpu", {})
-    gpus = gpu_payload.get("gpus", []) if isinstance(gpu_payload, dict) else []
-    if not gpus:
-        torch_devices = payload.get("torch", {}).get("devices", [])
-        gpus = torch_devices if isinstance(torch_devices, list) else []
-    if not gpus:
-        return "-"
-    names = [str(gpu.get("name", "unknown")) for gpu in gpus if isinstance(gpu, dict)]
-    unique_names = list(dict.fromkeys(names))
-    if len(unique_names) == 1:
-        return f"{len(gpus)}x {unique_names[0]}"
-    return ", ".join(unique_names)
-
-
-def _hardware_gpu_memory(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    gpu_payload = payload.get("gpu", {})
-    gpus = gpu_payload.get("gpus", []) if isinstance(gpu_payload, dict) else []
-    values = [
-        float(gpu["memory_total_gb"])
-        for gpu in gpus
-        if isinstance(gpu, dict) and gpu.get("memory_total_gb") is not None
-    ]
-    if not values:
-        values = [
-            float(gpu["total_memory_gb"])
-            for gpu in payload.get("torch", {}).get("devices", [])
-            if isinstance(gpu, dict) and gpu.get("total_memory_gb") is not None
-        ]
-    if not values:
-        return "-"
-    return f"{sum(values):.1f} GB"
-
-
 def _hardware_first_gpu_field(payload: dict[str, Any] | None, field: str) -> str:
     if not payload:
         return "-"
@@ -330,22 +292,6 @@ def _hardware_gpu_power(payload: dict[str, Any] | None) -> str:
         return value
 
 
-def _hardware_torch_version(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    torch_payload = payload.get("torch", {})
-    version = torch_payload.get("version") if isinstance(torch_payload, dict) else None
-    return str(version) if version else "-"
-
-
-def _hardware_python_version(payload: dict[str, Any] | None) -> str:
-    if not payload:
-        return "-"
-    python_payload = payload.get("python", {})
-    version = python_payload.get("version") if isinstance(python_payload, dict) else None
-    return str(version) if version else "-"
-
-
 def table_hardware_results(
     model_key: str,
     milestones: list[int],
@@ -376,8 +322,6 @@ def table_hardware_results(
                     "method": method_name,
                     "result type": result_name,
                     "run": run_index,
-                    "gpu": _hardware_gpu_label(payload),
-                    "gpu memory": _hardware_gpu_memory(payload),
                     "gpu power": _hardware_gpu_power(payload),
                     "pcie": _hardware_pcie_label(payload),
                     "cpu": payload.get("cpu", {}).get("model", "-"),
@@ -389,8 +333,6 @@ def table_hardware_results(
                         else "-"
                     ),
                     "driver": _hardware_first_gpu_field(payload, "driver_version"),
-                    "torch": _hardware_torch_version(payload),
-                    "python": _hardware_python_version(payload),
                 })
 
     df = pd.DataFrame(rows)

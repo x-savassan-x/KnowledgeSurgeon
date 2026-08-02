@@ -1,11 +1,9 @@
-from typing import Union, List
-
 import numpy as np
 import torch
 
 def lerp(
-    t: float, v0: Union[np.ndarray, torch.Tensor], v1: Union[np.ndarray, torch.Tensor]
-) -> Union[np.ndarray, torch.Tensor]:
+    t: float, v0: np.ndarray | torch.Tensor, v1: np.ndarray | torch.Tensor
+) -> np.ndarray | torch.Tensor:
     return (1 - t) * v0 + t * v1
 
 def maybe_torch(v: np.ndarray, is_torch: bool) -> np.ndarray | torch.Tensor:
@@ -25,9 +23,9 @@ class slerp:
         pass
     def execute(
         self,
-        t: Union[float, List[float]],
-        v0: Union[List[torch.Tensor], torch.Tensor],
-        v1: Union[List[torch.Tensor], torch.Tensor],
+        t: float | list[float],
+        v0: list[torch.Tensor] | torch.Tensor,
+        v1: list[torch.Tensor] | torch.Tensor,
         DOT_THRESHOLD: float = 0.9995,
         eps: float = 1e-8,
         densities=None,

@@ -1,5 +1,3 @@
-from typing import Union, List
-
 import torch
 
 class linear:
@@ -7,9 +5,9 @@ class linear:
         pass
     def execute(
         self,
-        t: Union[float, List[float]],
-        v0: Union[List[torch.Tensor], torch.Tensor],
-        v1: Union[List[torch.Tensor], torch.Tensor],
+        t: float | list[float],
+        v0: list[torch.Tensor] | torch.Tensor,
+        v1: list[torch.Tensor] | torch.Tensor,
         DOT_THRESHOLD: float = 0.9995,
         eps: float = 1e-8,
         densities=None,

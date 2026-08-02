@@ -1,7 +1,5 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Optional
-
 import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -74,11 +72,11 @@ def _resolve_cache_matrix(
 def apply_AlphaEdit_to_model(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    requests: List[Dict],
+    requests: list[dict],
     hparams,
     copy: bool = False,
     return_orig_weights: bool = False,
-    cache_template: Optional[str] = None,
+    cache_template: str | None = None,
     keep_original_weight: bool = False,
     reset_cache: bool = False,
     **kwargs,
@@ -124,9 +122,9 @@ def apply_AlphaEdit_to_model(
 def execute_AlphaEdit(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    requests: List[Dict],
+    requests: list[dict],
     hparams,
-    cache_template: Optional[str] = None,
+    cache_template: str | None = None,
     cache_matrix: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """
@@ -362,7 +360,7 @@ def upd_matrix_match_shape(matrix: torch.Tensor, shape: torch.Size) -> torch.Ten
 def get_context_templates(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-) -> List[List[str]]:
+) -> list[list[str]]:
     global CONTEXT_TEMPLATES_CACHE
 
     if CONTEXT_TEMPLATES_CACHE is None:
