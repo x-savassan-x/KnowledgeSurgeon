@@ -14,6 +14,8 @@ dependencies = [
     "sentence-transformers",
     "FlagEmbedding",
     "torch",
+    "flash-linear-attention; sys_platform == 'linux'",
+    "causal-conv1d; sys_platform == 'linux'",
     "openai",
     "safetensors",
     # _____ Utils _____
