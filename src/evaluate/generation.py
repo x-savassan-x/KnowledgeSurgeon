@@ -114,6 +114,8 @@ def get_model_predictions(model, tokenizer, records: list[EvalRecord], **config)
 
 
 def parse_cuda_device_index(value) -> int:
+    if isinstance(value, bool):
+        raise TypeError("CUDA device indices must not be booleans")
     if isinstance(value, int):
         return value
     text = str(value).strip().lower()
@@ -124,66 +126,133 @@ def parse_cuda_device_index(value) -> int:
     raise ValueError(f"Unsupported CUDA device spec: {value!r}")
 
 
-def model_device_index(model) -> int | None:
-    for param in model.parameters():
-        if param.device.type == "cuda":
-            return param.device.index
-    return None
+def model_device_indices(model) -> list[int]:
+    indices = {
+        tensor.device.index
+        for tensor in [*model.parameters(), *model.buffers()]
+        if tensor.device.type == "cuda" and tensor.device.index is not None
+    }
+    return sorted(indices)
 
 
 def async_generation_device_indices(
     editor: Editor,
     editing_method: str,
     generation_config: dict[str, Any],
-    log_fn: Callable[[str], None] | None = None,
 ) -> list[int]:
     async_config = generation_config.get("async_generation", {}) or {}
     enabled = async_config.get("enabled", "auto")
     if isinstance(enabled, str):
-        enabled_key = enabled.lower()
-    else:
+        enabled_key = enabled.strip().lower()
+    elif isinstance(enabled, bool):
         enabled_key = "true" if enabled else "false"
+    else:
+        raise TypeError(
+            "generation.async_generation.enabled must be auto or a boolean"
+        )
 
+    valid_enabled = {
+        "auto", "true", "1", "yes", "on", "false", "0", "no", "off",
+    }
+    if enabled_key not in valid_enabled:
+        raise ValueError(
+            "generation.async_generation.enabled must be auto, true, or false"
+        )
     if enabled_key in {"false", "0", "no", "off"}:
         return []
+    enabled_required = enabled_key in {"true", "1", "yes", "on"}
     if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
-        if enabled_key == "true":
+        if enabled_required:
             raise RuntimeError("Async generation requires at least 2 CUDA devices")
         return []
 
-    # MNEMO mutates both weights and an external-memory router at consolidation
-    # boundaries. Keep milestone generation synchronous until snapshot transfer is
-    # validated under concurrent editing.
-    unsafe_methods = {"mnemo"} | set(async_config.get("unsafe_methods", []))
-    if editing_method in unsafe_methods:
-        if log_fn is not None:
-            log_fn(f"[async-generation-disabled] method={editing_method} reason=stateful_adapter")
+    disabled_reason = async_generation_disabled_reason(
+        editor,
+        editing_method,
+        generation_config,
+    )
+    if disabled_reason is not None:
         return []
 
-    edit_device_idx = model_device_index(editor.model)
+    edit_device_indices = set(model_device_indices(editor.model))
     devices = async_config.get("devices", "auto")
     if devices == "auto":
         candidate_indices = list(range(torch.cuda.device_count()))
     else:
-        candidate_indices = [parse_cuda_device_index(device) for device in devices]
+        if isinstance(devices, (str, int)) and not isinstance(devices, bool):
+            devices = [devices]
+        if not isinstance(devices, (list, tuple)):
+            raise TypeError(
+                "generation.async_generation.devices must be auto or a device list"
+            )
+        candidate_indices = list(dict.fromkeys(
+            parse_cuda_device_index(device) for device in devices
+        ))
+        invalid_indices = [
+            idx
+            for idx in candidate_indices
+            if idx < 0 or idx >= torch.cuda.device_count()
+        ]
+        if invalid_indices:
+            raise ValueError(
+                "generation.async_generation.devices contains unavailable CUDA "
+                f"indices: {invalid_indices}"
+            )
 
-    generation_indices = [idx for idx in candidate_indices if idx != edit_device_idx]
-    generation_indices = [idx for idx in generation_indices if 0 <= idx < torch.cuda.device_count()]
+    generation_indices = [
+        idx for idx in candidate_indices if idx not in edit_device_indices
+    ]
 
-    if not generation_indices and enabled_key == "true":
+    if not generation_indices and enabled_required:
         raise RuntimeError("No valid generation CUDA devices are available")
 
     return generation_indices
 
 
-def sync_editor_state(source_editor: Editor, target_editor: Editor, target_device_idx: int) -> None:
+def async_generation_disabled_reason(
+    editor: Editor,
+    editing_method: str,
+    generation_config: dict[str, Any],
+) -> str | None:
+    async_config = generation_config.get("async_generation", {}) or {}
+    enabled = async_config.get("enabled", "auto")
+    if enabled is False or (
+        isinstance(enabled, str)
+        and enabled.strip().lower() in {"false", "0", "no", "off"}
+    ):
+        return "configured_disabled"
+    configured_unsafe = async_config.get("unsafe_methods", [])
+    if not isinstance(configured_unsafe, (list, tuple, set)):
+        raise TypeError(
+            "generation.async_generation.unsafe_methods must be a method list"
+        )
+    configured_unsafe_methods = {
+        str(method).strip().lower() for method in configured_unsafe
+    }
+    editor_supports_async = getattr(editor, "supports_async_generation", True)
+    if not editor_supports_async:
+        reason = getattr(editor, "async_generation_disabled_reason", None)
+        return reason or "editor_does_not_support_async_generation"
+    if editing_method.strip().lower() in configured_unsafe_methods:
+        return "configured_unsafe_method"
+    return None
+
+
+def sync_editor_state(
+    source_editor: Editor,
+    target_editor: Editor,
+    target_device_idx: int,
+) -> None:
+    if torch.cuda.is_available():
+        for source_idx in model_device_indices(source_editor.model):
+            torch.cuda.synchronize(source_idx)
     source_editor.sync_generation_state_to(target_editor)
     target_editor.model.eval()
     if torch.cuda.is_available():
-        source_idx = model_device_index(source_editor.model)
-        if source_idx is not None:
-            torch.cuda.synchronize(source_idx)
-        torch.cuda.synchronize(target_device_idx)
+        target_indices = set(model_device_indices(target_editor.model))
+        target_indices.add(target_device_idx)
+        for target_idx in sorted(target_indices):
+            torch.cuda.synchronize(target_idx)
 
 
 def generate_and_save_unscored(
@@ -299,22 +368,30 @@ class AsyncGenerationManager:
         self.evaluation_dir = evaluation_dir
         self.slots: list[dict[str, Any]] = []
 
-        for device_idx in generation_device_indices:
-            from ..editors import load_editor
+        try:
+            for device_idx in generation_device_indices:
+                from ..editors import load_editor
 
-            self.log(
-                "[async-generation-load] "
-                f"run={run_index}/{n_runs} "
-                f"method={editing_method} "
-                f"device=cuda:{device_idx}"
-            )
-            gen_editor = load_editor(str(config_path), gpu_id=device_idx)
-            gen_editor.model.eval()
-            self.slots.append({
-                "device_idx": device_idx,
-                "editor": gen_editor,
-                "task": None,
-            })
+                self.log(
+                    "[async-generation-load] "
+                    f"run={run_index}/{n_runs} "
+                    f"method={editing_method} "
+                    f"device=cuda:{device_idx}"
+                )
+                gen_editor = load_editor(
+                    str(config_path),
+                    gpu_id=device_idx,
+                    warmup=False,
+                )
+                gen_editor.model.eval()
+                self.slots.append({
+                    "device_idx": device_idx,
+                    "editor": gen_editor,
+                    "task": None,
+                })
+        except BaseException:
+            self._dispose_slots()
+            raise
 
     @property
     def enabled(self) -> bool:
@@ -387,9 +464,23 @@ class AsyncGenerationManager:
         )
 
     async def close(self) -> None:
-        while self._active_tasks():
-            await self._wait_for_one()
+        first_error: BaseException | None = None
+        try:
+            while self._active_tasks():
+                try:
+                    await self._wait_for_one()
+                except BaseException as exc:
+                    if first_error is None:
+                        first_error = exc
+        finally:
+            self._dispose_slots()
+        if first_error is not None:
+            raise first_error
 
+    def _dispose_slots(self) -> None:
+        device_indices = {
+            slot["device_idx"] for slot in self.slots if "device_idx" in slot
+        }
         for slot in self.slots:
             try:
                 slot["editor"].reset()
@@ -404,7 +495,9 @@ class AsyncGenerationManager:
         self.slots.clear()
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            for device_idx in sorted(device_indices):
+                with torch.cuda.device(device_idx):
+                    torch.cuda.empty_cache()
 
     def _active_tasks(self) -> list[asyncio.Future]:
         return [slot["task"] for slot in self.slots if slot.get("task") is not None]
@@ -447,6 +540,15 @@ class AsyncGenerationManager:
         slot["task"] = None
         try:
             path = await task
+        except asyncio.CancelledError:
+            self.log(
+                "[generation-cancelled] "
+                f"run={self.run_index}/{self.n_runs} "
+                f"method={self.editing_method} "
+                f"result={self.result_name} "
+                f"device=cuda:{slot['device_idx']}"
+            )
+            raise
         except Exception as exc:
             self.log(
                 "[generation-failed] "

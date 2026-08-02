@@ -6,9 +6,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from ..config import Config
 from ..utils.devices import get_model_device
 from .editor_utils import EditRequest
+from .warmup import warm_up_model
 
 
 class Editor(ABC):
+    supports_async_generation = True
+    async_generation_disabled_reason: str | None = None
+
     def __init__(
         self,
         config: Config,
@@ -21,6 +25,14 @@ class Editor(ABC):
         if model is not None and tokenizer is not None:
             self.model = model
             self.tokenizer = tokenizer
+            if not self.tokenizer.pad_token:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+            if self.config.warmup:
+                warm_up_model(
+                    self.model,
+                    self.tokenizer,
+                    model_key=self.config.model_key,
+                )
             return
 
         model_kwargs = {
@@ -41,6 +53,12 @@ class Editor(ABC):
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        if self.config.warmup:
+            warm_up_model(
+                self.model,
+                self.tokenizer,
+                model_key=self.config.model_key,
+            )
 
     @abstractmethod
     def edit(self, request: EditRequest) -> None: ...

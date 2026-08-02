@@ -46,6 +46,9 @@ class Config:
     # Load model weights in bfloat16 instead of float32.
     fp16: bool
 
+    # Run a disposable gradient pass to compile model kernels before timing edits.
+    warmup: bool = False
+
     # Shard the model across visible GPUs through the Hugging Face device map.
     model_parallel: bool = False
 

@@ -33,6 +33,8 @@ class Mnemo(Editor):
     """Hybrid external memory with transactional weight consolidation."""
 
     config: MnemoConfig
+    supports_async_generation = False
+    async_generation_disabled_reason = "generation_copy_retains_hybrid_state"
 
     def __init__(self, config: MnemoConfig, model=None, tokenizer=None) -> None:
         super().__init__(config, model=model, tokenizer=tokenizer)

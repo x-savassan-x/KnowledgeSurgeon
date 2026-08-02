@@ -2,6 +2,7 @@ model_name: meta-llama/Llama-3.1-8B
 gpu_id: 0
 fp16: true
 model_parallel: false
+warmup: false
 
 # Match the native context regime of the Llama 3 configs used as references.
 layer_stats_max_length: 8192

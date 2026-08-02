@@ -28,11 +28,14 @@ def load_editor(
     model=None,
     tokenizer=None,
     gpu_id: int | None = None,
+    warmup: bool | None = None,
 ) -> Editor:
     config = load_config(config_path)
     if gpu_id is not None:
         config.gpu_id = int(gpu_id)
         config.device = torch.device(f"cuda:{config.gpu_id}")
+    if warmup is not None:
+        config.warmup = warmup
 
     alg_name = config.alg_name
     if alg_name not in EDITOR_REGISTRY:
