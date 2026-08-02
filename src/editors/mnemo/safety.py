@@ -433,3 +433,223 @@ def assess_consolidation_safety(
             "sphere_cumulative_relative_drift": sphere.cumulative_relative_drift,
         },
     )
+
+
+def consolidation_safety_summary(
+    result: ConsolidationSafetyResult,
+    config: MnemoSafetyConfig,
+) -> dict[str, object]:
+    """Return a compact, human-readable explanation of a safety decision.
+
+    The full dataclass is useful for programmatic inspection, but is too noisy
+    for generation logs.  This summary keeps the measured values, applicable
+    limits, and the exact checks that voted for or against consolidation.
+    """
+
+    def triggered(*checks: tuple[str, bool]) -> list[str]:
+        return [name for name, active in checks if active]
+
+    def finite_mapping(payload: dict[str, object]) -> dict[str, object]:
+        def replace(value: object) -> object:
+            if isinstance(value, float) and not isfinite(value):
+                return None
+            if isinstance(value, dict):
+                return {key: replace(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [replace(item) for item in value]
+            return value
+
+        return {key: replace(value) for key, value in payload.items()}
+
+    numerical = result.numerical
+    behavioral = result.behavioral
+    retention = result.retention
+    sphere = result.sphere
+    numerical_triggers = triggered(
+        ("nonfinite_tensors", bool(numerical.nonfinite_tensors)),
+        (
+            "relative_update_norm_warning",
+            numerical.maximum_relative_update_norm
+            >= config.relative_update_norm_warning,
+        ),
+        (
+            "relative_update_norm_hard_limit",
+            numerical.maximum_relative_update_norm
+            >= config.relative_update_norm_hard_limit,
+        ),
+    )
+    behavioral_triggers = triggered(
+        (
+            "nonfinite_metrics",
+            not all(isfinite(value) for value in (
+                behavioral.step_kl,
+                behavioral.cumulative_kl,
+                behavioral.step_nll_change,
+                behavioral.cumulative_nll_change,
+            )),
+        ),
+        ("step_kl_warning", behavioral.step_kl >= config.step_kl_warning),
+        ("step_kl_hard_limit", behavioral.step_kl >= config.step_kl_hard_limit),
+        (
+            "cumulative_kl_warning",
+            behavioral.cumulative_kl >= config.cumulative_kl_warning,
+        ),
+        (
+            "cumulative_kl_hard_limit",
+            behavioral.cumulative_kl >= config.cumulative_kl_hard_limit,
+        ),
+        ("step_nll_warning", behavioral.step_nll_change >= config.step_nll_warning),
+        ("step_nll_hard_limit", behavioral.step_nll_change >= config.step_nll_hard_limit),
+        (
+            "cumulative_nll_warning",
+            behavioral.cumulative_nll_change >= config.cumulative_nll_warning,
+        ),
+        (
+            "cumulative_nll_hard_limit",
+            behavioral.cumulative_nll_change >= config.cumulative_nll_hard_limit,
+        ),
+    )
+    retention_triggers = triggered(
+        (
+            "nonfinite_metrics",
+            not all(isfinite(value) for value in (
+                retention.current_batch_success,
+                retention.retained_success,
+                *(
+                    ()
+                    if retention.retained_reference_success is None
+                    else (retention.retained_reference_success,)
+                ),
+                *(
+                    ()
+                    if retention.retained_mean_drop is None
+                    else (retention.retained_mean_drop,)
+                ),
+            )),
+        ),
+        (
+            "current_batch_min_success",
+            retention.current_batch_success < config.current_batch_min_success,
+        ),
+        (
+            "retention_min_success",
+            retention.retained_success < config.retention_min_success,
+        ),
+        (
+            "retention_max_mean_drop",
+            retention.retained_mean_drop is not None
+            and retention.retained_mean_drop > config.retention_max_mean_drop,
+        ),
+    )
+    sphere_triggers = triggered(
+        (
+            "nonfinite_metrics",
+            not all(isfinite(value) for value in (
+                sphere.candidate_energy,
+                sphere.last_safe_energy,
+                sphere.original_energy,
+                sphere.step_relative_drift,
+                sphere.cumulative_relative_drift,
+            )),
+        ),
+        ("sphere_step_warning", sphere.step_relative_drift >= config.sphere_step_warning),
+        ("sphere_step_hard_limit", sphere.step_relative_drift >= config.sphere_step_hard_limit),
+        (
+            "sphere_cumulative_warning",
+            sphere.cumulative_relative_drift >= config.sphere_cumulative_warning,
+        ),
+        (
+            "sphere_cumulative_hard_limit",
+            sphere.cumulative_relative_drift >= config.sphere_cumulative_hard_limit,
+        ),
+    )
+    warning_detectors = [
+        name
+        for name, detector in (
+            ("numerical", numerical),
+            ("behavioral", behavioral),
+            ("retention", retention),
+            ("sphere", sphere),
+        )
+        if detector.warning
+    ]
+    hard_failures = [
+        name
+        for name, detector in (
+            ("numerical", numerical),
+            ("behavioral", behavioral),
+            ("retention", retention),
+            ("sphere", sphere),
+        )
+        if not detector.safe
+    ]
+    return finite_mapping({
+        "decision": "commit" if result.safe else "external_only",
+        "safe": result.safe,
+        "hard_failures": hard_failures,
+        "warning_detectors": warning_detectors,
+        "warning_votes": result.warning_count,
+        "warning_votes_required": config.warning_votes_required,
+        "checks": {
+            "numerical": {
+                "safe": numerical.safe,
+                "warning": numerical.warning,
+                "maximum_relative_update_norm": numerical.maximum_relative_update_norm,
+                "warning_limit": config.relative_update_norm_warning,
+                "hard_limit": config.relative_update_norm_hard_limit,
+                "nonfinite_tensors": list(numerical.nonfinite_tensors),
+                "triggered": numerical_triggers,
+            },
+            "behavioral": {
+                "safe": behavioral.safe,
+                "warning": behavioral.warning,
+                "sample_count": behavioral.sample_count,
+                "step_kl": behavioral.step_kl,
+                "cumulative_kl": behavioral.cumulative_kl,
+                "step_nll_change": behavioral.step_nll_change,
+                "cumulative_nll_change": behavioral.cumulative_nll_change,
+                "thresholds": {
+                    "step_kl_warning": config.step_kl_warning,
+                    "step_kl_hard_limit": config.step_kl_hard_limit,
+                    "cumulative_kl_warning": config.cumulative_kl_warning,
+                    "cumulative_kl_hard_limit": config.cumulative_kl_hard_limit,
+                    "step_nll_warning": config.step_nll_warning,
+                    "step_nll_hard_limit": config.step_nll_hard_limit,
+                    "cumulative_nll_warning": config.cumulative_nll_warning,
+                    "cumulative_nll_hard_limit": config.cumulative_nll_hard_limit,
+                },
+                "triggered": behavioral_triggers,
+            },
+            "retention": {
+                "safe": retention.safe,
+                "warning": retention.warning,
+                "current_batch_success": retention.current_batch_success,
+                "retained_success": retention.retained_success,
+                "retained_reference_success": retention.retained_reference_success,
+                "retained_mean_drop": retention.retained_mean_drop,
+                "thresholds": {
+                    "current_batch_min_success": config.current_batch_min_success,
+                    "retention_min_success": config.retention_min_success,
+                    "retention_max_mean_drop": config.retention_max_mean_drop,
+                },
+                "triggered": retention_triggers,
+            },
+            "sphere": {
+                "safe": sphere.safe,
+                "warning": sphere.warning,
+                "sample_count": sphere.sample_count,
+                "candidate_energy": sphere.candidate_energy,
+                "last_safe_energy": sphere.last_safe_energy,
+                "original_energy": sphere.original_energy,
+                "step_relative_drift": sphere.step_relative_drift,
+                "cumulative_relative_drift": sphere.cumulative_relative_drift,
+                "thresholds": {
+                    "step_warning": config.sphere_step_warning,
+                    "step_hard_limit": config.sphere_step_hard_limit,
+                    "cumulative_warning": config.sphere_cumulative_warning,
+                    "cumulative_hard_limit": config.sphere_cumulative_hard_limit,
+                },
+                "triggered": sphere_triggers,
+            },
+        },
+    })

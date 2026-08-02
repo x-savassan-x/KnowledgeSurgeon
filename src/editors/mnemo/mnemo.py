@@ -3,6 +3,7 @@ import json
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
+from math import isfinite
 from pathlib import Path
 
 import torch
@@ -21,7 +22,11 @@ from .ext_mem.interceptor import Interceptor, PrefillRoutingModel
 from .ext_mem.router import build_router
 from .ext_mem.storage import MnemoStorage
 from .ext_mem.value import InterventionTrainer
-from .safety import ConsolidationSafetyResult, NumericalGuardResult
+from .safety import (
+    ConsolidationSafetyResult,
+    NumericalGuardResult,
+    consolidation_safety_summary,
+)
 
 
 class Mnemo(Editor):
@@ -100,6 +105,7 @@ class Mnemo(Editor):
         self.last_delta_saturated: bool | None = None
         self.last_consolidation_report: dict | None = None
         self.consolidation_history: list[dict] = []
+        self._pending_log_events: list[dict[str, object]] = []
         self._install_runtime()
         if self.config.safety_config.enabled and not self._external_only:
             # Preserve the pretrained reference before deferred consolidations begin.
@@ -107,7 +113,7 @@ class Mnemo(Editor):
 
     def edit(self, request: EditRequest) -> None:
         self._install_runtime()
-        key = self.router.encode([request.prompt])
+        key = self.router.encode_keys([request.prompt])
         value, delta_norm, loss = self._value_trainer_or_raise().train(request)
         memory_index = self.storage.append(
             key,
@@ -160,6 +166,7 @@ class Mnemo(Editor):
         self.last_delta_saturated = None
         self.last_consolidation_report = None
         self.consolidation_history.clear()
+        self._pending_log_events.clear()
         if self._interceptor is not None:
             self._interceptor.close()
             self._interceptor = None
@@ -179,6 +186,11 @@ class Mnemo(Editor):
     @property
     def external_only(self) -> bool:
         return self._external_only
+
+    def drain_log_events(self) -> list[dict[str, object]]:
+        events = self._pending_log_events
+        self._pending_log_events = []
+        return events
 
     @property
     def external_memory_size(self) -> int:
@@ -211,20 +223,27 @@ class Mnemo(Editor):
             self._enter_external_only("proposal_error", error=error)
             return False
 
+        safety_config = self.config.safety_config
         numerical = self._proposal_numerical_guard(proposal)
         if not numerical.safe:
             proposal.rollback()
             self._enter_external_only(
                 "numerical",
                 metrics={
+                    "safe": numerical.safe,
+                    "warning": numerical.warning,
                     "maximum_relative_update_norm": (
                         numerical.maximum_relative_update_norm
-                    )
+                        if isfinite(numerical.maximum_relative_update_norm)
+                        else None
+                    ),
+                    "warning_limit": safety_config.relative_update_norm_warning,
+                    "hard_limit": safety_config.relative_update_norm_hard_limit,
+                    "nonfinite_tensors": list(numerical.nonfinite_tensors),
                 },
             )
             return False
 
-        safety_config = self.config.safety_config
         if not safety_config.enabled:
             safe = self._commit_without_full_safety(
                 proposal,
@@ -432,8 +451,11 @@ class Mnemo(Editor):
         }
         if result is not None:
             report["safety"] = asdict(result)
-        self.last_consolidation_report = report
-        self.consolidation_history.append(report)
+            report["safety_summary"] = consolidation_safety_summary(
+                result,
+                self.config.safety_config,
+            )
+        self._record_consolidation_report(report)
 
     def _enter_external_only(
         self,
@@ -445,12 +467,19 @@ class Mnemo(Editor):
     ) -> None:
         self._external_only = True
         self._refresh_routing_thresholds(force=True)
+        if result is not None:
+            safety_status = "checked"
+        elif reason == "numerical":
+            safety_status = "numerical"
+        else:
+            safety_status = "error"
         report = {
             "safe": False,
             "cycle": self._consolidation_count + 1,
             "retained_external_edits": self.external_memory_size,
             "total_consolidated_edits": self._consolidated_edit_count,
             "external_only": True,
+            "safety_status": safety_status,
             "reasons": [reason],
         }
         if error is not None:
@@ -459,10 +488,28 @@ class Mnemo(Editor):
             report["metrics"] = metrics
         if result is not None:
             report["safety"] = asdict(result)
+            report["safety_summary"] = consolidation_safety_summary(
+                result,
+                self.config.safety_config,
+            )
             report["reasons"] = list(result.reasons) or [reason]
+        self._record_consolidation_report(report)
+        self._release_hybrid_only_state()
+
+    def _record_consolidation_report(self, report: dict) -> None:
         self.last_consolidation_report = report
         self.consolidation_history.append(report)
-        self._release_hybrid_only_state()
+        diagnostics = report.get("safety_summary", report.get("metrics", {}))
+        if "error" in report:
+            diagnostics = {**diagnostics, "error": report["error"]}
+        self._pending_log_events.append({
+            "event": "consolidation",
+            "safe": report["safe"],
+            "external_only": report["external_only"],
+            "safety_status": report["safety_status"],
+            "reasons": report.get("reasons", []),
+            "diagnostics": diagnostics,
+        })
 
     def _release_hybrid_only_state(self) -> None:
         self.storage.compact_for_external_only()

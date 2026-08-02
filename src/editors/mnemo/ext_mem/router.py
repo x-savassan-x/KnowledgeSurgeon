@@ -1,8 +1,5 @@
 from abc import ABC, abstractmethod
-from contextlib import redirect_stderr
 from dataclasses import dataclass
-from io import StringIO
-import inspect
 
 import numpy as np
 import torch
@@ -31,69 +28,79 @@ class PromptEncoder(ABC):
     def encode(self, prompts: list[str]) -> torch.Tensor:
         pass
 
+    def encode_queries(self, prompts: list[str]) -> torch.Tensor:
+        return self.encode(prompts)
 
-class BgeM3Encoder(PromptEncoder):
-    """Dense prompt encoder backed by FlagEmbedding's BGE-M3 model."""
+    def encode_keys(self, prompts: list[str]) -> torch.Tensor:
+        return self.encode(prompts)
+
+
+class SentenceTransformerEncoder(PromptEncoder):
+    """Dense encoder for the SentenceTransformers model family.
+
+    E5 models require asymmetric ``query:`` and ``passage:`` prefixes; other
+    registered models use the prompt text unchanged.
+    """
 
     def __init__(
         self,
         *,
-        model_name: str = "BAAI/bge-m3",
+        model_name: str,
         device: str = "cpu",
         use_fp16: bool = False,
         max_length: int = 384,
         batch_size: int = 64,
+        query_prefix: str | None = None,
+        passage_prefix: str | None = None,
         embedder=None,
     ) -> None:
+        if not model_name:
+            raise ValueError("model_name must not be empty")
         if max_length <= 0:
             raise ValueError("max_length must be positive")
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
-
         self.model_name = model_name
         self.device = str(device)
         self.use_fp16 = bool(use_fp16 and self.device.startswith("cuda"))
         self.max_length = int(max_length)
         self.batch_size = int(batch_size)
+        is_e5 = "e5" in self.model_name.casefold()
+        self.query_prefix = (
+            "query: " if query_prefix is None and is_e5 else str(query_prefix or "")
+        )
+        self.passage_prefix = (
+            "passage: " if passage_prefix is None and is_e5 else str(passage_prefix or "")
+        )
         self._embedder = embedder
 
     def load(self) -> None:
         self._get_embedder()
 
     def encode(self, prompts: list[str]) -> torch.Tensor:
+        return self._encode(prompts, role="query")
+
+    def encode_queries(self, prompts: list[str]) -> torch.Tensor:
+        return self._encode(prompts, role="query")
+
+    def encode_keys(self, prompts: list[str]) -> torch.Tensor:
+        return self._encode(prompts, role="passage")
+
+    def _encode(self, prompts: list[str], *, role: str) -> torch.Tensor:
         if not prompts:
             return torch.empty((0, 0), dtype=torch.float32, device="cpu")
-
-        encode = self._get_embedder().encode
-        kwargs = {
-            "batch_size": self.batch_size,
-            "max_length": self.max_length,
-            "return_dense": True,
-            "return_sparse": False,
-            "return_colbert_vecs": False,
-        }
-        try:
-            signature = inspect.signature(encode)
-        except (TypeError, ValueError):
-            call_kwargs = kwargs
-        else:
-            accepts_kwargs = any(
-                parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in signature.parameters.values()
-            )
-            call_kwargs = (
-                kwargs
-                if accepts_kwargs
-                else {key: value for key, value in kwargs.items() if key in signature.parameters}
-            )
-
-        with redirect_stderr(StringIO()):
-            encoded = encode(prompts, **call_kwargs)
-        if isinstance(encoded, dict):
-            if "dense_vecs" not in encoded:
-                raise ValueError("Embedding result does not contain dense_vecs")
-            encoded = encoded["dense_vecs"]
-
+        if role not in {"query", "passage", "symmetric"}:
+            raise ValueError("SentenceTransformer prompt role must be query, passage, or symmetric")
+        prefix = self._prefix_for(role)
+        formatted = [f"{prefix}{prompt}" for prompt in prompts]
+        model = self._get_embedder()
+        encoded = model.encode(
+            formatted,
+            batch_size=self.batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=False,
+        )
         embeddings = _cpu_float_matrix(encoded)
         if embeddings.ndim != 2 or embeddings.shape[0] != len(prompts):
             raise ValueError(
@@ -101,15 +108,23 @@ class BgeM3Encoder(PromptEncoder):
             )
         return embeddings
 
+    def _prefix_for(self, role: str) -> str:
+        return {
+            "query": self.query_prefix,
+            "passage": self.passage_prefix,
+            "symmetric": self.query_prefix,
+        }[role]
+
     def _get_embedder(self):
         if self._embedder is None:
-            from FlagEmbedding import BGEM3FlagModel
+            from sentence_transformers import SentenceTransformer
 
-            self._embedder = BGEM3FlagModel(
-                self.model_name,
-                use_fp16=self.use_fp16,
-                devices=self.device,
+            self._embedder = SentenceTransformer(self.model_name, device=self.device)
+            self._embedder.max_seq_length = min(
+                int(self._embedder.max_seq_length), self.max_length
             )
+            if self.use_fp16:
+                self._embedder.half()
         return self._embedder
 
 
@@ -155,7 +170,21 @@ class Router:
             dimension = self.embedding_dimension or 0
             return torch.empty((0, dimension), dtype=torch.float32, device="cpu")
 
-        embeddings = _normalize_rows(_cpu_float_matrix(self.encoder.encode(prompts)))
+        encode = getattr(self.encoder, "encode_queries", self.encoder.encode)
+        embeddings = _normalize_rows(_cpu_float_matrix(encode(prompts)))
+        if embeddings.ndim != 2 or embeddings.shape[0] != len(prompts):
+            raise ValueError(
+                f"Unexpected embedding shape {tuple(embeddings.shape)} for {len(prompts)} prompts"
+            )
+        return embeddings
+
+    def encode_keys(self, prompts: list[str]) -> torch.Tensor:
+        if not prompts:
+            dimension = self.embedding_dimension or 0
+            return torch.empty((0, dimension), dtype=torch.float32, device="cpu")
+
+        encode = getattr(self.encoder, "encode_keys", self.encoder.encode)
+        embeddings = _normalize_rows(_cpu_float_matrix(encode(prompts)))
         if embeddings.ndim != 2 or embeddings.shape[0] != len(prompts):
             raise ValueError(
                 f"Unexpected embedding shape {tuple(embeddings.shape)} for {len(prompts)} prompts"
@@ -163,7 +192,7 @@ class Router:
         return embeddings
 
     def add_prompts(self, prompts: list[str]) -> torch.Tensor:
-        embeddings = self.encode(prompts)
+        embeddings = self.encode_keys(prompts)
         self.add_embeddings(embeddings)
         return embeddings
 
@@ -226,7 +255,15 @@ class Router:
 
 
 ROUTER_ENCODERS: dict[str, type[PromptEncoder]] = {
-    "bge-m3": BgeM3Encoder,
+    "bge-base-en-v1.5": SentenceTransformerEncoder,
+    "e5-base-v2": SentenceTransformerEncoder,
+    "all-minilm-l6-v2": SentenceTransformerEncoder,
+}
+
+ROUTER_PREFIXES: dict[str, tuple[str, str]] = {
+    "bge-base-en-v1.5": ("", ""),
+    "e5-base-v2": ("query: ", "passage: "),
+    "all-minilm-l6-v2": ("", ""),
 }
 
 
@@ -248,12 +285,15 @@ def build_router(
         raise ValueError(
             f"Unsupported Mnemo router backend {backend!r}. Supported backends: {supported}."
         )
+    query_prefix, passage_prefix = ROUTER_PREFIXES[backend_key]
     encoder = encoder_type(
         model_name=model_name,
         device=device,
         use_fp16=use_fp16,
         max_length=max_length,
         batch_size=batch_size,
+        query_prefix=query_prefix,
+        passage_prefix=passage_prefix,
     )
     return Router(
         encoder=encoder,

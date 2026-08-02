@@ -4,6 +4,42 @@ from typing import Any
 from ..config import Config, resolve_project_path
 
 
+# The global experiment calibrates through 5,000 edits. Each null fallback
+# deliberately reuses that last profile; it is not an infinite-bank calibration.
+MNEMO_ROUTER_PRESETS: dict[str, dict[str, Any]] = {
+    "bge-base-en-v1.5": {
+        "model_name": "BAAI/bge-base-en-v1.5",
+        "thresholds": (
+            (100, 0.6630830764770508, 0.07978279143571854),
+            (1_000, 0.7187305092811584, 0.07721257954835892),
+            (2_000, 0.7015174031257629, 0.0976194217801094),
+            (5_000, 0.7373771071434021, 0.06535560637712479),
+            (None, 0.7373771071434021, 0.06535560637712479),
+        ),
+    },
+    "e5-base-v2": {
+        "model_name": "intfloat/e5-base-v2",
+        "thresholds": (
+            (100, 0.8250033259391785, 0.044400040060281754),
+            (1_000, 0.8329248428344727, 0.0455482043325901),
+            (2_000, 0.843231737613678, 0.03516644611954689),
+            (5_000, 0.8472376465797424, 0.0338285006582737),
+            (None, 0.8472376465797424, 0.0338285006582737),
+        ),
+    },
+    "all-minilm-l6-v2": {
+        "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+        "thresholds": (
+            (100, 0.5154905915260315, 0.1807645708322525),
+            (1_000, 0.5296052694320679, 0.1870354264974594),
+            (2_000, 0.6048957705497742, 0.10272795706987381),
+            (5_000, 0.5874411463737488, 0.12655426561832428),
+            (None, 0.5874411463737488, 0.12655426561832428),
+        ),
+    },
+}
+
+
 @dataclass
 class MnemoDiagnosticsConfig:
     # Global override; null delegates control to the component switches.
@@ -65,11 +101,11 @@ class MnemoRouterThresholdConfig:
 
 @dataclass
 class MnemoRouterConfig:
-    # Prompt-encoder backend registered with Mnemo's router factory.
-    backend: str = "bge-m3"
+    # Calibrated encoder preset: bge-base-en-v1.5, e5-base-v2, or all-minilm-l6-v2.
+    backend: str = "bge-base-en-v1.5"
 
-    # Hugging Face model ID or local path for the prompt encoder.
-    model_name: str = "BAAI/bge-m3"
+    # Hugging Face model ID fixed by the calibrated encoder preset.
+    model_name: str = field(init=False)
 
     # Device used for prompt encoding, or auto to select one at runtime.
     device: str = "auto"
@@ -89,47 +125,34 @@ class MnemoRouterConfig:
     # Retrieval gate applied to the nearest-neighbor scores.
     gate: str = "score_margin"
 
-    # Capacity-dependent calibrations from pooled FP16 BGE-M3 scores at 1% locality FAR.
-    thresholds: list[dict[str, float | int | None] | MnemoRouterThresholdConfig] = field(
-        default_factory=lambda: [
-            {
-                "max_bank_size": 100,
-                "score_threshold": 0.5810490846633911,
-                "margin_threshold": 0.06471586972475052,
-            },
-            {
-                "max_bank_size": 1_000,
-                "score_threshold": 0.6295567154884338,
-                "margin_threshold": 0.10444606095552444,
-            },
-            {
-                "max_bank_size": 2_000,
-                "score_threshold": 0.6295567750930786,
-                "margin_threshold": 0.10083300620317459,
-            },
-            {
-                "max_bank_size": 5_000,
-                "score_threshold": 0.6269395351409912,
-                "margin_threshold": 0.11267424374818802,
-            },
-            {
-                "max_bank_size": 10_000,
-                "score_threshold": 0.6538538336753845,
-                "margin_threshold": 0.08016670495271683,
-            },
-            {
-                "max_bank_size": None,
-                "score_threshold": 0.6538538336753845,
-                "margin_threshold": 0.09644604474306107,
-            },
-        ]
-    )
+    # Optional capacity calibration override; null uses the selected preset.
+    thresholds: list[
+        dict[str, float | int | None] | MnemoRouterThresholdConfig
+    ] | None = None
 
     threshold_configs: tuple[MnemoRouterThresholdConfig, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         if not self.backend:
             raise ValueError("Mnemo router backend must not be empty.")
+        self.backend = self.backend.strip().casefold().replace("_", "-")
+        preset = MNEMO_ROUTER_PRESETS.get(self.backend)
+        if preset is None:
+            supported = ", ".join(MNEMO_ROUTER_PRESETS)
+            raise ValueError(
+                f"Unsupported Mnemo router backend {self.backend!r}. "
+                f"Supported backends: {supported}."
+            )
+        self.model_name = str(preset["model_name"])
+        if self.thresholds is None:
+            self.thresholds = [
+                {
+                    "max_bank_size": max_bank_size,
+                    "score_threshold": score_threshold,
+                    "margin_threshold": margin_threshold,
+                }
+                for max_bank_size, score_threshold, margin_threshold in preset["thresholds"]
+            ]
         if not self.model_name:
             raise ValueError("Mnemo router model_name must not be empty.")
         if not self.device:

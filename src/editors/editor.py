@@ -48,6 +48,10 @@ class Editor(ABC):
     @abstractmethod
     def reset(self) -> None: ...
 
+    def drain_log_events(self) -> list[dict[str, object]]:
+        """Return and consume JSON-compatible events emitted since the last call."""
+        return []
+
     def sync_generation_state_to(self, target: "Editor") -> None:
         """Copy the current inference state into a generation-only editor."""
         target.model.load_state_dict(self.model.state_dict(), strict=True)

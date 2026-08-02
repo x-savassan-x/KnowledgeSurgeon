@@ -1,5 +1,5 @@
 from .interceptor import Interceptor, PrefillRoutingModel
-from .router import Router, RoutingDecision, build_router
+from .router import Router, RoutingDecision, SentenceTransformerEncoder, build_router
 from .storage import MnemoStorage
 from .value import InterventionTrainer, request_token_ids
 
@@ -10,6 +10,7 @@ __all__ = [
     "PrefillRoutingModel",
     "Router",
     "RoutingDecision",
+    "SentenceTransformerEncoder",
     "build_router",
     "request_token_ids",
 ]
