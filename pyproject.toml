@@ -3,28 +3,33 @@ name = "knowledge-surgeon"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
-    # _____ Data _____
-    "datasets",
-    "huggingface_hub",
-    "pandas",
+    # Data and numerical processing
     "numpy",
     "scipy",
-    # _____ AI _____
+    "pandas",
+    "datasets",
+    "huggingface_hub",
+
+    # Model editing and retrieval
+    "torch",
     "transformers",
     "sentence-transformers",
     "FlagEmbedding",
-    "torch",
+
+    # Qwen3.5 accelerated kernels
     "flash-linear-attention; sys_platform == 'linux'",
     "causal-conv1d; sys_platform == 'linux'",
+
+    # Evaluation and visualization
     "openai",
-    "safetensors",
-    # _____ Utils _____
+    "tqdm",
+    "matplotlib",
+
+    # Notebook and configuration support
     "ipykernel",
     "ipywidgets",
     "python-dotenv",
     "pyyaml",
-    "tqdm",
-    "matplotlib",
 ]
 
 
