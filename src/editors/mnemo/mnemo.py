@@ -30,11 +30,9 @@ from .safety import (
 
 
 class Mnemo(Editor):
-    """Hybrid external memory with transactional weight consolidation."""
+    """Mnemo editor supporting hybrid and external_only operating modes."""
 
     config: MnemoConfig
-    supports_async_generation = False
-    async_generation_disabled_reason = "generation_copy_retains_hybrid_state"
 
     def __init__(self, config: MnemoConfig, model=None, tokenizer=None) -> None:
         super().__init__(config, model=model, tokenizer=tokenizer)
@@ -111,12 +109,12 @@ class Mnemo(Editor):
         self._install_runtime()
         if self.config.safety_config.enabled and not self._external_only:
             # Preserve the pretrained reference before deferred consolidations begin.
-            self._validator_or_raise().ensure_reference()
+            self._require_validator().ensure_reference()
 
     def edit(self, request: EditRequest) -> None:
         self._install_runtime()
         key = self.router.encode_keys([request.prompt])
-        value, delta_norm, loss = self._value_trainer_or_raise().train(request)
+        value, delta_norm, loss = self._require_value_trainer().train(request)
         memory_index = self.storage.append(
             key,
             value,
@@ -217,8 +215,8 @@ class Mnemo(Editor):
             return False
 
         requests = self.storage.edits.records()
-        self._interceptor_or_raise().disarm()
-        writer = self._writer_or_raise()
+        self._require_interceptor().disarm()
+        writer = self._require_writer()
         try:
             proposal = writer.propose(requests)
         except Exception as error:
@@ -254,7 +252,7 @@ class Mnemo(Editor):
             )
         elif self._consolidated_edit_count < safety_config.start_after_edits:
             try:
-                self._validator_or_raise().ensure_reference()
+                self._require_validator().ensure_reference()
             except Exception as error:
                 proposal.rollback()
                 self._enter_external_only("validation_error", error=error)
@@ -318,24 +316,28 @@ class Mnemo(Editor):
         for parameter in self._base_model.parameters():
             parameter.requires_grad_(False)
 
-    def _interceptor_or_raise(self) -> Interceptor:
+    def _require_interceptor(self) -> Interceptor:
         if self._interceptor is None:
             raise RuntimeError("Mnemo interceptor is not installed.")
         return self._interceptor
 
-    def _writer_or_raise(self) -> ConsolidationWriter:
+    def _require_writer(self) -> ConsolidationWriter:
         if self.writer is None:
-            raise RuntimeError("External-only Mnemo has no consolidation writer.")
+            raise RuntimeError(
+                "Mnemo has no consolidation writer in external_only mode."
+            )
         return self.writer
 
-    def _value_trainer_or_raise(self) -> InterventionTrainer:
+    def _require_value_trainer(self) -> InterventionTrainer:
         if self._value_trainer is None:
             raise RuntimeError("Mnemo intervention trainer is not installed.")
         return self._value_trainer
 
-    def _validator_or_raise(self) -> ConsolidationValidator:
+    def _require_validator(self) -> ConsolidationValidator:
         if self._validator is None:
-            raise RuntimeError("External-only Mnemo has no consolidation validator.")
+            raise RuntimeError(
+                "Mnemo has no consolidation validator in external_only mode."
+            )
         return self._validator
 
     def _new_validator(self) -> ConsolidationValidator:
@@ -366,7 +368,7 @@ class Mnemo(Editor):
         self,
         proposal: ConsolidationProposal,
     ) -> NumericalGuardResult:
-        return self._validator_or_raise().numerical_guard(proposal)
+        return self._require_validator().numerical_guard(proposal)
 
     def _commit_without_full_safety(
         self,
@@ -396,10 +398,10 @@ class Mnemo(Editor):
         numerical: NumericalGuardResult,
     ) -> bool:
         try:
-            result = self._validator_or_raise().validate_candidate(
+            result = self._require_validator().validate_candidate(
                 proposal,
                 requests,
-                self._writer_or_raise(),
+                self._require_writer(),
                 consolidation_count=self._consolidation_count,
                 numerical=numerical,
             )
@@ -496,7 +498,7 @@ class Mnemo(Editor):
             )
             report["reasons"] = list(result.reasons) or [reason]
         self._record_consolidation_report(report)
-        self._release_hybrid_only_state()
+        self._release_consolidation_state()
 
     def _record_consolidation_report(self, report: dict) -> None:
         self.last_consolidation_report = report
@@ -513,7 +515,7 @@ class Mnemo(Editor):
             "diagnostics": diagnostics,
         })
 
-    def _release_hybrid_only_state(self) -> None:
+    def _release_consolidation_state(self) -> None:
         self.storage.compact_for_external_only()
         if self._validator is not None:
             self._validator.release()
@@ -526,16 +528,31 @@ class Mnemo(Editor):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def sync_generation_state_to(self, target: "Mnemo") -> None:
+    def copy_for_generation(self, target: "Mnemo") -> None:
         if not isinstance(target, Mnemo):
             raise TypeError("Mnemo generation state can only be copied to Mnemo.")
-        target._base_model.load_state_dict(self._base_model.state_dict(), strict=True)
+
+        # Mnemo's external edits are CPU-backed; only consolidation layers can
+        # differ between the source and a freshly loaded generation model.
+        if not self.config.external_only:
+            source_params = dict(self._base_model.named_parameters())
+            target_params = dict(target._base_model.named_parameters())
+            rewrite_template = self.config.consolidation_config.rewrite_module_tmp
+            for layer in self.config.consolidation_config.layers:
+                name = f"{rewrite_template.format(layer)}.weight"
+                if name not in source_params or name not in target_params:
+                    raise KeyError(
+                        f"Mnemo generation copy cannot find consolidated weight {name!r}."
+                    )
+                with torch.no_grad():
+                    target_params[name].copy_(source_params[name])
+
         target.storage.load_state(self.storage.copy_state())
-        target._external_only = self._external_only
         target._refresh_routing_thresholds(force=True)
-        if target._external_only:
-            # Generation-only copies must not retain Mnemo's consolidation snapshots
-            # or safety reservoir after the source has switched to external memory.
-            target._release_hybrid_only_state()
-        target._interceptor_or_raise().disarm()
+
+        # Generation only needs the interceptor, router, and storage. Do not
+        # carry the writer, validator, or raw consolidation history into it.
+        target._release_consolidation_state()
+        target._value_trainer = None
+        target._require_interceptor().disarm()
         target.model.eval()

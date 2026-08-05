@@ -89,16 +89,21 @@ def _format_mean_std(
     std: float | None = None,
     decimals: int = 4,
     suffix: str = "",
+    show_std: bool = True,
 ) -> str:
     if value is None:
         return "-"
-    if std is None:
+    if not show_std or std is None:
         return f"{value:.{decimals}f}{suffix}"
     return f"{value:.{decimals}f} +/- {std:.{decimals}f}{suffix}"
 
 
-def _format_seconds_mean_std(value: float | None, std: float | None = None) -> str:
-    return _format_mean_std(value, std, decimals=2, suffix="s")
+def _format_seconds_mean_std(
+    value: float | None,
+    std: float | None = None,
+    show_std: bool = True,
+) -> str:
+    return _format_mean_std(value, std, decimals=2, suffix="s", show_std=show_std)
 
 
 def _ordered_method_names(data: dict[str, Any], methods: list[str]) -> list[str]:

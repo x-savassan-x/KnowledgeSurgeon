@@ -37,3 +37,10 @@ class AlphaEdit(Editor):
         self._initial_weights = {}
         # Reset AlphaEdit's cumulative cache so it reinitializes on next edit
         _ae_mod.cache_c_new = False
+
+    def copy_for_generation(self, target: "AlphaEdit") -> None:
+        if not isinstance(target, AlphaEdit):
+            raise TypeError(
+                "AlphaEdit generation copy requires another AlphaEdit editor."
+            )
+        self.copy_named_parameters(self, target, self._initial_weights)

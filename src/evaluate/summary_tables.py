@@ -39,6 +39,7 @@ def table_perf_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    show_std: bool = True,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
@@ -75,10 +76,10 @@ def table_perf_results(
             for _, metric_name in METRIC_ORDER:
                 value = summary[metric_name][step_index]
                 std = summary.get(f"{metric_name}_std", [None] * len(milestones))[step_index]
-                row.append(_format_mean_std(value, std))
+                row.append(_format_mean_std(value, std, show_std=show_std))
             quality_value = _quality_series(summary)[step_index]
             quality_std = _std_series_for_metric(summary, "quality")[step_index]
-            row.append(_format_mean_std(quality_value, quality_std))
+            row.append(_format_mean_std(quality_value, quality_std, show_std=show_std))
         table_data[method_name] = row
 
     df = pd.DataFrame.from_dict(table_data, orient="index", columns=columns)
@@ -94,6 +95,7 @@ def table_time_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    show_std: bool = True,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -108,7 +110,7 @@ def table_time_results(
     for method_name in _ordered_method_names(data, methods):
         summary = data[method_name]
         table_data[method_name] = [
-            _format_seconds_mean_std(value, std)
+            _format_seconds_mean_std(value, std, show_std=show_std)
             for value, std in zip(summary["avg_time"], summary.get("avg_time_std", [None] * len(milestones)))
         ]
 
@@ -125,6 +127,7 @@ def table_composite_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    show_std: bool = True,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -140,7 +143,7 @@ def table_composite_results(
         composite_values = _composite_series(data[method_name])
         composite_stds = _std_series_for_metric(data[method_name], "composite")
         table_data[method_name] = [
-            _format_mean_std(value, std)
+            _format_mean_std(value, std, show_std=show_std)
             for value, std in zip(composite_values, composite_stds)
         ]
 
@@ -157,6 +160,7 @@ def table_memory_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    show_std: bool = True,
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -190,6 +194,7 @@ def table_memory_results(
                     summary.get(f"{metric_name}_std", [None] * len(milestones))[step_index],
                     decimals=2,
                     suffix=" GB",
+                    show_std=show_std,
                 ))
         for _, metric_name in metrics:
             peak_name = f"peak_{metric_name}"
@@ -198,6 +203,7 @@ def table_memory_results(
                 summary.get(f"{peak_name}_std"),
                 decimals=2,
                 suffix=" GB",
+                show_std=show_std,
             ))
         table_data[method_name] = row
 

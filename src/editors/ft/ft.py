@@ -38,3 +38,8 @@ class FT(Editor):
             for name, weight in self._initial_weights.items():
                 params[name][...] = weight.clone()
         self._initial_weights = {}
+
+    def copy_for_generation(self, target: "FT") -> None:
+        if not isinstance(target, FT):
+            raise TypeError("FT generation copy requires another FT editor.")
+        self.copy_named_parameters(self, target, self._initial_weights)

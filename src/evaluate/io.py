@@ -5,8 +5,19 @@ from pathlib import Path
 from typing import Any
 
 
-EVALUATION_DIR = Path(__file__).resolve().parents[2] / "data" / "evaluation"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EVALUATION_DIR = PROJECT_ROOT / "data" / "evaluation"
 RESULT_GROUPS = {"perf", "unscored", "scored", "time", "mem", "hardware"}
+
+
+def format_log_path(path: Path | str) -> str:
+    """Format paths consistently for logs without exposing the project root."""
+    path = Path(path)
+    try:
+        path = path.resolve().relative_to(PROJECT_ROOT)
+    except (OSError, ValueError):
+        pass
+    return path.as_posix()
 
 
 def _normalize_milestones(milestones: list[int]) -> list[int]:

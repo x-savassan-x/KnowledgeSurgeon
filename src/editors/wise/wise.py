@@ -91,14 +91,23 @@ class WISE(Editor):
         clear_edit_histories()
         self._loc_index = 0
 
-    def sync_generation_state_to(self, target: "WISE") -> None:
+    def copy_for_generation(self, target: "WISE") -> None:
+        if not isinstance(target, WISE):
+            raise TypeError("WISE generation copy requires another WISE editor.")
+
         self._ensure_generation_adapter(target)
-        target.model.load_state_dict(self.model.state_dict(), strict=True)
 
         source_adapter = self._get_adapter()
         target_adapter = target._get_adapter()
         if source_adapter is not None and target_adapter is not None:
-            self._copy_adapter_state(source_adapter, target_adapter)
+            # Retrieve mode stores multiple side-memory shards. Merge mode
+            # instead accumulates edits in its single side-memory layer.
+            if not self.config.retrieve:
+                target_adapter.layer.weight = self._clone_parameter(
+                    source_adapter.layer.weight,
+                    target_adapter.device,
+                )
+            self._copy_inference_state(source_adapter, target_adapter)
 
         target.model.eval()
 
@@ -133,10 +142,16 @@ class WISE(Editor):
         )
 
     @classmethod
-    def _copy_adapter_state(cls, source: WISEAdapter, target: WISEAdapter) -> None:
+    def _copy_inference_state(
+        cls,
+        source: WISEAdapter,
+        target: WISEAdapter,
+    ) -> None:
         device = target.device
 
-        target.new_weight = cls._clone_parameter(source.new_weight, device)
+        with torch.no_grad():
+            target.new_weight.copy_(source.new_weight)
+        target.new_weight.requires_grad_(False)
         target.memory_weight = [
             cls._clone_tensor(weight, device)
             for weight in getattr(source, "memory_weight", [])
@@ -148,13 +163,9 @@ class WISE(Editor):
         target.editing_mean_act = copy.deepcopy(
             getattr(source, "editing_mean_act", EditingMeanAct())
         )
-        target.editing_total_cnt = getattr(source, "editing_total_cnt", 0)
-        target.merge_cnt = getattr(source, "merge_cnt", 0)
-
-        if hasattr(source, "weight_mask"):
-            target.weight_mask = cls._clone_tensor(source.weight_mask, device)
-        elif hasattr(target, "weight_mask"):
-            delattr(target, "weight_mask")
+        if not source.config.retrieve:
+            # WISE-Merge may defer its final pending shard merge until inference.
+            target.editing_total_cnt = getattr(source, "editing_total_cnt", 0)
 
         target.training = False
         target.editing = False

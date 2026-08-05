@@ -525,7 +525,7 @@ class MnemoConfig(Config):
     # Number of externally stored edits consolidated in each weight update.
     consolidation_cycle: int = 100
 
-    # Disable consolidation and use external memory from initialization.
+    # Start in external_only mode instead of hybrid mode.
     external_only: bool = False
 
     # Component diagnostics with an optional all-on/all-off override.
@@ -542,7 +542,7 @@ class MnemoConfig(Config):
     # Blend strength applied to a retrieved intervention vector.
     intervention_strength: float = 1.0
 
-    # Mnemo-owned projected weight writer used during hybrid operation.
+    # Mnemo-owned projected weight writer used in hybrid mode.
     consolidation: dict[str, Any] | MnemoConsolidationConfig = field(
         default_factory=dict
     )

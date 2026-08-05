@@ -155,6 +155,7 @@ def plot_perf_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (14.0, 17.5),
+    show_std: bool = True,
 ) -> None:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
@@ -197,7 +198,8 @@ def plot_perf_results(
             stds = _std_series_for_metric(data[method_name], metric_name)
             if not any(value is not None for value in values):
                 continue
-            _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0, upper_bound=1.0)
+            if show_std:
+                _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0, upper_bound=1.0)
             line_ax.plot(
                 milestone_positions,
                 values,
@@ -225,7 +227,7 @@ def plot_perf_results(
             for value, std in zip(values, stds)
             if value is not None and std is not None
         ]
-        yerr = bar_stds if len(bar_stds) == len(bar_values) else None
+        yerr = bar_stds if show_std and len(bar_stds) == len(bar_values) else None
         if bar_values:
             bar_ax.bar(
                 bar_methods,
@@ -273,6 +275,7 @@ def plot_time_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 7.0),
+    show_std: bool = True,
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -294,7 +297,8 @@ def plot_time_results(
         stds = data[method_name].get("avg_time_std", [None] * len(milestones))
         if not any(value is not None for value in values):
             continue
-        _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
+        if show_std:
+            _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
         line_ax.plot(
             milestone_positions,
             values,
@@ -325,7 +329,7 @@ def plot_time_results(
         for value, std in zip(final_times, final_time_stds)
         if value is not None and std is not None
     ]
-    yerr = bar_stds if len(bar_stds) == len(bar_values) else None
+    yerr = bar_stds if show_std and len(bar_stds) == len(bar_values) else None
     if bar_values:
         bar_ax.bar(
             bar_methods,
@@ -372,6 +376,7 @@ def plot_composite_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 7.0),
+    show_std: bool = True,
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -396,7 +401,8 @@ def plot_composite_results(
         stds = _std_series_for_metric(data[method_name], "composite")
         if not any(value is not None for value in values):
             continue
-        _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
+        if show_std:
+            _plot_std_band(line_ax, milestone_positions, values, stds, method_colors[method_name], lower_bound=0.0)
         line_ax.plot(
             milestone_positions,
             values,
@@ -427,7 +433,7 @@ def plot_composite_results(
         for value, std in zip(values, stds)
         if value is not None and std is not None
     ]
-    yerr = bar_stds if len(bar_stds) == len(bar_values) else None
+    yerr = bar_stds if show_std and len(bar_stds) == len(bar_values) else None
     if bar_values:
         bar_ax.bar(
             bar_methods,
@@ -475,6 +481,7 @@ def plot_memory_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 11.0),
+    show_std: bool = True,
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -500,13 +507,14 @@ def plot_memory_results(
             stds = data[method_name].get(f"{key}_std", [None] * len(milestones))
             if not any(value is not None for value in values):
                 continue
-            _plot_std_band(
-                line_ax,
-                milestone_positions,
-                values,
-                stds,
-                method_colors[method_name],
-            )
+            if show_std:
+                _plot_std_band(
+                    line_ax,
+                    milestone_positions,
+                    values,
+                    stds,
+                    method_colors[method_name],
+                )
             line_ax.plot(
                 milestone_positions,
                 values,
@@ -540,7 +548,7 @@ def plot_memory_results(
             for method_name in methods_sorted
             for std in data[method_name].get(f"{key}_std", [None] * len(milestones))
         ]
-        line_ax.set_ylim(*_adaptive_memory_ylim(all_values, all_stds))
+        line_ax.set_ylim(*_adaptive_memory_ylim(all_values, all_stds if show_std else None))
         line_ax.set_title(f"{label} memory at milestones", fontweight="bold")
         line_ax.grid(alpha=0.25)
 
@@ -553,7 +561,7 @@ def plot_memory_results(
             for value, std in zip(peak_values, peak_stds)
             if value is not None and std is not None
         ]
-        yerr = bar_stds if len(bar_stds) == len(bar_values) else None
+        yerr = bar_stds if show_std and len(bar_stds) == len(bar_values) else None
 
         if bar_values:
             bar_ax.bar(
@@ -611,6 +619,7 @@ def plot_pareto_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (14.0, 8.0),
+    show_std: bool = True,
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
@@ -647,19 +656,20 @@ def plot_pareto_results(
         if avg_time is None or quality is None:
             continue
 
-        ax.errorbar(
-            avg_time,
-            quality,
-            xerr=avg_time_std,
-            yerr=quality_std,
-            fmt="none",
-            ecolor=method_colors[method_name],
-            elinewidth=2.2,
-            capsize=6,
-            capthick=2.0,
-            alpha=0.9,
-            zorder=4,
-        )
+        if show_std:
+            ax.errorbar(
+                avg_time,
+                quality,
+                xerr=avg_time_std,
+                yerr=quality_std,
+                fmt="none",
+                ecolor=method_colors[method_name],
+                elinewidth=2.2,
+                capsize=6,
+                capthick=2.0,
+                alpha=0.9,
+                zorder=4,
+            )
         marker_area = point_size(memory)
         ax.scatter(
             avg_time,
@@ -703,7 +713,9 @@ def plot_pareto_results(
         )
         has_points = True
         quality_values.append(float(quality))
-        quality_stds.append(float(quality_std) if quality_std is not None else None)
+        quality_stds.append(
+            float(quality_std) if show_std and quality_std is not None else None
+        )
 
     if not has_points:
         ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="gray")
@@ -712,11 +724,10 @@ def plot_pareto_results(
     ax.set_ylabel("H-mean")
     ax.set_ylim(*_adaptive_score_ylim(quality_values, quality_stds))
     ax.set_xlim(left=0)
-    ax.set_title(
-        "final H-mean/time Pareto\n"
-        "point size = peak allocated memory; error bars = +/- 1 std across runs",
-        fontweight="bold",
-    )
+    detail = "point size = peak allocated memory"
+    if show_std:
+        detail += "; error bars = +/- 1 std across runs"
+    ax.set_title(f"final H-mean/time Pareto\n{detail}", fontweight="bold")
     ax.grid(alpha=0.25)
     ax.legend(loc="best", title="method")
     fig.suptitle(f"pareto | {model_key} | {milestones} | r{n_runs}-j{judge_repeats}", fontsize=13, fontweight="bold", y=1.02)

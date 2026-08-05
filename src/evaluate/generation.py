@@ -18,7 +18,7 @@ from .generation_utils import (
     get_generation_runtime_config,
     snapshot_eval_inputs,
 )
-from .io import save_unscored_results
+from .io import format_log_path, save_unscored_results
 from .schema import EvalRecord, EvalResult
 
 if TYPE_CHECKING:
@@ -238,7 +238,7 @@ def async_generation_disabled_reason(
     return None
 
 
-def sync_editor_state(
+def copy_editor_for_generation(
     source_editor: Editor,
     target_editor: Editor,
     target_device_idx: int,
@@ -246,7 +246,7 @@ def sync_editor_state(
     if torch.cuda.is_available():
         for source_idx in model_device_indices(source_editor.model):
             torch.cuda.synchronize(source_idx)
-    source_editor.sync_generation_state_to(target_editor)
+    source_editor.copy_for_generation(target_editor)
     target_editor.model.eval()
     if torch.cuda.is_available():
         target_indices = set(model_device_indices(target_editor.model))
@@ -329,7 +329,7 @@ def generate_and_save_unscored(
         f"result={result_name} "
         f"step={step}/{max_step} "
         f"device={generation_device_idx if generation_device_idx is not None else 'edit'} "
-        f"unscored={unscored_path}"
+        f"unscored={format_log_path(unscored_path)}"
     )
     return unscored_path
 
@@ -406,16 +406,16 @@ class AsyncGenerationManager:
         slot = await self._acquire_slot(step)
         device_idx = slot["device_idx"]
         self.log(
-            "[milestone-sync-start] "
+            "[milestone-copy-start] "
             f"run={self.run_index}/{self.n_runs} "
             f"method={self.editing_method} "
             f"result={self.result_name} "
             f"step={step}/{self.max_step} "
             f"device=cuda:{device_idx}"
         )
-        sync_editor_state(self.editor, slot["editor"], device_idx)
+        copy_editor_for_generation(self.editor, slot["editor"], device_idx)
         self.log(
-            "[milestone-sync-done] "
+            "[milestone-copy-done] "
             f"run={self.run_index}/{self.n_runs} "
             f"method={self.editing_method} "
             f"result={self.result_name} "
@@ -565,7 +565,7 @@ class AsyncGenerationManager:
             f"method={self.editing_method} "
             f"result={self.result_name} "
             f"device=cuda:{slot['device_idx']} "
-            f"unscored={path}"
+            f"unscored={format_log_path(path)}"
         )
 
     def _build_generation_job(

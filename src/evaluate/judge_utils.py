@@ -5,7 +5,12 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Iterable
 
-from .io import EVALUATION_DIR, build_milestone_result_path, load_result_file
+from .io import (
+    EVALUATION_DIR,
+    build_milestone_result_path,
+    format_log_path,
+    load_result_file,
+)
 from .schema import EvalRecord
 
 
@@ -152,7 +157,7 @@ def log_status(
 def format_file_label(path: Path, evaluation_dir: Path | str | None = None) -> str:
     parsed = load_result_file(path, evaluation_dir=evaluation_dir)
     if parsed is None:
-        return str(path)
+        return format_log_path(path)
     meta, _ = parsed
     return (
         f"method={meta['method']} "

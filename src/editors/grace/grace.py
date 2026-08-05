@@ -50,7 +50,7 @@ class GRACE(Editor):
         self._grace_model = None
         self.model = self._base_model
 
-    def sync_generation_state_to(self, target: "GRACE") -> None:
+    def copy_for_generation(self, target: "GRACE") -> None:
         self._ensure_generation_adapter(target)
 
         source_adapter = self._get_adapter()

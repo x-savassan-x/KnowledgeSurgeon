@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from .io import (
     EVALUATION_DIR,
     build_result_path,
+    format_log_path,
     load_result_file,
     save_benchmark_results,
     save_scored_results,
@@ -398,7 +399,7 @@ def materialize_base_perf_results(
                 f"model={model_key} "
                 f"result={result_name} "
                 f"judge_repeats={judge_repeats} "
-                f"path={scored_path} "
+                f"path={format_log_path(scored_path)} "
                 "reason=scored_file_missing",
                 log_path,
                 verbose,
@@ -413,7 +414,7 @@ def materialize_base_perf_results(
                 "[base-skip] "
                 f"model={model_key} "
                 f"result={result_name} "
-                f"path={scored_path} "
+                f"path={format_log_path(scored_path)} "
                 "reason=limited_baseline_not_reusable",
                 log_path,
                 verbose,
@@ -464,7 +465,7 @@ def materialize_base_perf_results(
                     f"model={model_key} "
                     f"result={result_name} "
                     f"run={run_index}/{n_runs} "
-                    f"path={perf_path}",
+                    f"path={format_log_path(perf_path)}",
                     log_path,
                     verbose,
                 )
@@ -506,7 +507,7 @@ def materialize_base_perf_results(
                 f"model={model_key} "
                 f"result={result_name} "
                 f"run={run_index}/{n_runs} "
-                f"path={perf_path}",
+                f"path={format_log_path(perf_path)}",
                 log_path,
                 verbose,
             )
@@ -558,7 +559,11 @@ def rebuild_perf_from_scored(
         verbose,
     )
     for perf_path in perf_paths:
-        log_status(f"[perf-path] {perf_path}", log_path, verbose)
+        log_status(
+            f"[perf-path] {format_log_path(perf_path)}",
+            log_path,
+            verbose,
+        )
     return perf_paths
 
 
@@ -644,14 +649,22 @@ async def score_pending_unscored(
 
     async def _score_path(path: Path) -> Path:
         label = format_file_label(path, evaluation_dir=evaluation_dir)
-        log_status(f"[score-start] {label} path={path}", log_path, worker_verbose)
+        log_status(
+            f"[score-start] {label} path={format_log_path(path)}",
+            log_path,
+            worker_verbose,
+        )
         scored_path = await score_unscored_file(
             path=path,
             judge_config=judge_config,
             evaluation_dir=evaluation_dir,
             overwrite=overwrite,
         )
-        log_status(f"[score-done] {label} scored={scored_path}", log_path, worker_verbose)
+        log_status(
+            f"[score-done] {label} scored={format_log_path(scored_path)}",
+            log_path,
+            worker_verbose,
+        )
         return scored_path
 
     try:
@@ -706,7 +719,7 @@ async def score_pending_unscored(
                     except Exception as exc:
                         log_status(
                             "[score-error] "
-                            f"path={source_path} "
+                            f"path={format_log_path(source_path)} "
                             f"error={type(exc).__name__}: {exc}",
                             log_path,
                             verbose=True,
@@ -718,14 +731,12 @@ async def score_pending_unscored(
                 continue
 
             idle_polls += 1
-            if idle_polls == 1 or idle_polls % 30 == 0:
+            if idle_polls == 1:
                 missing_count = None
                 if expected_paths is not None:
                     missing_count = len(missing_paths(expected_paths))
                 log_status(
                     "[idle] "
-                    f"idle_polls={idle_polls} "
-                    f"watch={watch} "
                     f"missing_expected={missing_count if missing_count is not None else 'unknown'}",
                     log_path,
                     worker_verbose,

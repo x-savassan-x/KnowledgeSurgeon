@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -70,7 +71,25 @@ class Editor(ABC):
         """Return and consume JSON-compatible events emitted since the last call."""
         return []
 
-    def sync_generation_state_to(self, target: "Editor") -> None:
+    @abstractmethod
+    def copy_for_generation(self, target: "Editor") -> None:
         """Copy the current inference state into a generation-only editor."""
-        target.model.load_state_dict(self.model.state_dict(), strict=True)
+        ...
+
+    @staticmethod
+    def copy_named_parameters(
+        source: "Editor",
+        target: "Editor",
+        names: Iterable[str],
+    ) -> None:
+        """Copy only parameters changed by a parameter-editing method."""
+        source_params = dict(source.model.named_parameters())
+        target_params = dict(target.model.named_parameters())
+        for name in names:
+            if name not in source_params or name not in target_params:
+                raise KeyError(
+                    f"Generation copy cannot find edited parameter {name!r}."
+                )
+            with torch.no_grad():
+                target_params[name].copy_(source_params[name])
         target.model.eval()

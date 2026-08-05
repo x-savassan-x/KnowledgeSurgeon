@@ -36,3 +36,8 @@ class ROME(Editor):
             for name, weight in self._initial_weights.items():
                 params[name][...] = weight.clone()
         self._initial_weights = {}
+
+    def copy_for_generation(self, target: "ROME") -> None:
+        if not isinstance(target, ROME):
+            raise TypeError("ROME generation copy requires another ROME editor.")
+        self.copy_named_parameters(self, target, self._initial_weights)
