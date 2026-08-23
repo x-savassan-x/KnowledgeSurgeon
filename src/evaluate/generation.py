@@ -274,6 +274,7 @@ def generate_and_save_unscored(
     log_fn: Callable[[str], None],
     generation_device_idx: int | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     if generation_device_idx is not None and torch.cuda.is_available():
         torch.cuda.set_device(generation_device_idx)
@@ -321,6 +322,7 @@ def generate_and_save_unscored(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     log_fn(
         "[milestone-generated] "
@@ -352,6 +354,7 @@ class AsyncGenerationManager:
         aggregate_eval_results: Callable[[list[EvalResult]], EvalResult],
         log_fn: Callable[[str], None],
         evaluation_dir: Path | str | None = None,
+        eval_type: str = "output",
     ) -> None:
         self.editor = editor
         self.editing_method = editing_method
@@ -366,6 +369,7 @@ class AsyncGenerationManager:
         self.aggregate_eval_results = aggregate_eval_results
         self.log = log_fn
         self.evaluation_dir = evaluation_dir
+        self.eval_type = eval_type
         self.slots: list[dict[str, Any]] = []
 
         try:
@@ -597,6 +601,7 @@ class AsyncGenerationManager:
                 log_fn=self.log,
                 generation_device_idx=device_idx,
                 evaluation_dir=self.evaluation_dir,
+                eval_type=self.eval_type,
             )
 
         return _job

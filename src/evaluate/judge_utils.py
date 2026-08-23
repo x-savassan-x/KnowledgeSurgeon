@@ -6,10 +6,10 @@ from statistics import mean
 from typing import Any, Iterable
 
 from .io import (
-    EVALUATION_DIR,
     build_milestone_result_path,
     format_log_path,
     load_result_file,
+    resolve_evaluation_root,
 )
 from .schema import EvalRecord
 
@@ -154,8 +154,12 @@ def log_status(
             print(line)
 
 
-def format_file_label(path: Path, evaluation_dir: Path | str | None = None) -> str:
-    parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+def format_file_label(
+    path: Path,
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
+) -> str:
+    parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
     if parsed is None:
         return format_log_path(path)
     meta, _ = parsed
@@ -223,7 +227,10 @@ def matches_filter(
     result_names: set[str] | None,
     run_indices: set[int] | None,
     result_group: str,
+    eval_type: str = "output",
 ) -> bool:
+    if meta["eval_type"] != eval_type:
+        return False
     if meta["result_group"] != result_group:
         return False
     if meta["model_key"] != model_key:
@@ -244,6 +251,7 @@ def matches_filter(
 def scored_path_from_meta(
     meta: dict[str, Any],
     evaluation_dir: Path | str | None = None,
+    eval_type: str | None = None,
 ) -> Path:
     return build_milestone_result_path(
         model_key=meta["model_key"],
@@ -256,6 +264,7 @@ def scored_path_from_meta(
         judge_repeats=meta["judge_repeats"],
         result_group="scored",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type or meta["eval_type"],
     )
 
 
@@ -269,6 +278,7 @@ def find_milestone_files(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[Path]:
     milestones = normalize_milestones(milestones)
     methods_set = as_set(methods)
@@ -276,9 +286,9 @@ def find_milestone_files(
     run_indices_set = as_set(run_indices)
 
     matched_paths: list[Path] = []
-    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     for path in root.rglob(f"{result_group}/*.json"):
-        parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+        parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
         if parsed is None:
             continue
         meta, _ = parsed
@@ -292,6 +302,7 @@ def find_milestone_files(
             result_names=result_names_set,
             run_indices=run_indices_set,
             result_group=result_group,
+            eval_type=eval_type,
         ):
             matched_paths.append(path)
 
@@ -307,6 +318,7 @@ def find_unscored_files(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[Path]:
     return find_milestone_files(
         model_key=model_key,
@@ -318,6 +330,7 @@ def find_unscored_files(
         result_names=result_names,
         run_indices=run_indices,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
 
@@ -330,6 +343,7 @@ def find_scored_files(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[Path]:
     return find_milestone_files(
         model_key=model_key,
@@ -341,20 +355,26 @@ def find_scored_files(
         result_names=result_names,
         run_indices=run_indices,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
 
 def existing_scored_path_for_unscored(
     path: Path,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path | None:
-    parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+    parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
     if parsed is None:
         return None
     meta, _ = parsed
     if meta["result_group"] != "unscored":
         return None
-    return scored_path_from_meta(meta, evaluation_dir=evaluation_dir)
+    return scored_path_from_meta(
+        meta,
+        evaluation_dir=evaluation_dir,
+        eval_type=meta["eval_type"],
+    )
 
 
 def expected_scored_paths(
@@ -366,6 +386,7 @@ def expected_scored_paths(
     result_names: Iterable[str] | None,
     run_indices: Iterable[int] | None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[Path] | None:
     if methods is None or result_names is None:
         return None
@@ -385,6 +406,7 @@ def expected_scored_paths(
             judge_repeats=judge_repeats,
             result_group="scored",
             evaluation_dir=evaluation_dir,
+            eval_type=eval_type,
         )
         for method in methods
         for result_name in result_names
@@ -401,8 +423,9 @@ def base_scored_dir(
     model_key: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     return root / model_key / "base" / "scored" / f"j{judge_repeats}"
 
 
@@ -411,16 +434,28 @@ def base_scored_path(
     result_name: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
-    return base_scored_dir(model_key, judge_repeats, evaluation_dir=evaluation_dir) / f"{result_name}.json"
+    return base_scored_dir(
+        model_key,
+        judge_repeats,
+        evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
+    ) / f"{result_name}.json"
 
 
 def base_result_names(
     model_key: str,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[str]:
-    scored_dir = base_scored_dir(model_key, judge_repeats, evaluation_dir=evaluation_dir)
+    scored_dir = base_scored_dir(
+        model_key,
+        judge_repeats,
+        evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
+    )
     if not scored_dir.exists():
         return []
     return sorted(path.stem for path in scored_dir.glob("*.json") if path.is_file())

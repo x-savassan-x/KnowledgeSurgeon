@@ -4,6 +4,10 @@ src_orig
 writing
 temp
 
+.agents/
+.codex/
+AGENTS.md
+
 notebook/test.ipynb
 
 # Byte-compiled / optimized / DLL files

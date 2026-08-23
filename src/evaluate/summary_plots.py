@@ -156,6 +156,7 @@ def plot_perf_results(
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (14.0, 17.5),
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> None:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
@@ -165,8 +166,9 @@ def plot_perf_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
-    data, skipped = _load_results_with_skips(model_key, milestones, perf_methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, perf_methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     final_data = _load_performance_finals(data)
     _print_skipped(skipped)
     if not data or not final_data:
@@ -276,10 +278,11 @@ def plot_time_results(
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 7.0),
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -377,10 +380,11 @@ def plot_composite_results(
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 7.0),
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     final_data = _load_composite_finals(data)
     _print_skipped(skipped)
     if not data or not final_data:
@@ -482,10 +486,11 @@ def plot_memory_results(
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (18.0, 11.0),
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -620,10 +625,11 @@ def plot_pareto_results(
     evaluation_dir: Path | str | None = None,
     figsize: tuple[float, float] = (14.0, 8.0),
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> None:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")

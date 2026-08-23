@@ -429,6 +429,7 @@ def save_run_hardware(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     hardware = collect_hardware_info()
     return save_hardware_results(
@@ -441,4 +442,5 @@ def save_run_hardware(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )

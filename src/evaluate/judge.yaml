@@ -1,0 +1,36 @@
+# Selects the evaluation namespace processed by judge.ipynb and summary.ipynb.
+eval_type: output
+# eval_type: sensitivity
+# eval_type: intrinsic
+
+judge:
+  base_url: http://localhost:8000/v1
+  api_key: local
+  model: Qwen/Qwen3.6-35B-A3B-FP8
+  repeats: 3
+  max_concurrency: 50
+  batch_size: 10
+  max_retries: 5
+  init_retry_delay: 1.0
+  max_retry_delay: 10.0
+
+  model_config:
+    max_tokens: 64
+    temperature: 0.01
+    top_p: 1.0
+    presence_penalty: 0.0
+    frequency_penalty: 0.0
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
+  # keep_pbar: false
+  # verbose: false
+
+worker:
+  watch: true
+  poll_interval: 10.0
+  file_concurrency: 1
+  overwrite: false
+  stop_when_complete: true
+  verbose: true

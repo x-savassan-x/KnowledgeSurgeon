@@ -7,7 +7,26 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EVALUATION_DIR = PROJECT_ROOT / "data" / "evaluation"
+EVAL_TYPES = frozenset({"output", "sensitivity", "intrinsic"})
 RESULT_GROUPS = {"perf", "unscored", "scored", "time", "mem", "hardware"}
+
+
+def normalize_eval_type(eval_type: str = "output") -> str:
+    if not isinstance(eval_type, str):
+        raise TypeError("eval_type must be a string")
+    normalized = eval_type.strip().casefold()
+    if normalized not in EVAL_TYPES:
+        allowed = ", ".join(sorted(EVAL_TYPES))
+        raise ValueError(f"eval_type must be one of: {allowed}")
+    return normalized
+
+
+def resolve_evaluation_root(
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
+) -> Path:
+    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
+    return root / normalize_eval_type(eval_type)
 
 
 def format_log_path(path: Path | str) -> str:
@@ -54,6 +73,7 @@ def build_method_dir(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     return build_experiment_dir(
         model_key=model_key,
@@ -61,6 +81,7 @@ def build_method_dir(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     ) / editing_method
 
 
@@ -70,8 +91,9 @@ def build_experiment_dir(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     return (
         root
         / model_key
@@ -89,6 +111,7 @@ def build_hardware_path(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     if run_index <= 0:
         raise ValueError("run_index must be > 0")
@@ -102,6 +125,7 @@ def build_hardware_path(
             n_runs=n_runs,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
+            eval_type=eval_type,
         )
         / "hardware"
         / f"{result_name}_{run_index}.json"
@@ -118,6 +142,7 @@ def build_result_path(
     judge_repeats: int,
     result_group: str = "perf",
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     if run_index <= 0:
         raise ValueError("run_index must be > 0")
@@ -131,6 +156,7 @@ def build_result_path(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     return method_dir / result_group / f"{result_name}.{run_index}.json"
 
@@ -146,6 +172,7 @@ def build_milestone_result_path(
     judge_repeats: int,
     result_group: str,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     if run_index <= 0:
         raise ValueError("run_index must be > 0")
@@ -160,6 +187,7 @@ def build_milestone_result_path(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     return method_dir / result_group / f"{result_name}.{run_index}.{step}.json"
 
@@ -187,6 +215,7 @@ def save_benchmark_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_result_path(
         model_key=model_key,
@@ -198,6 +227,7 @@ def save_benchmark_results(
         judge_repeats=judge_repeats,
         result_group="perf",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     _write_json(path, results)
 
@@ -215,6 +245,7 @@ def save_unscored_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_milestone_result_path(
         model_key=model_key,
@@ -227,6 +258,7 @@ def save_unscored_results(
         judge_repeats=judge_repeats,
         result_group="unscored",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
     _write_json(path, result)
@@ -245,6 +277,7 @@ def save_scored_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_milestone_result_path(
         model_key=model_key,
@@ -257,6 +290,7 @@ def save_scored_results(
         judge_repeats=judge_repeats,
         result_group="scored",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
     _write_json(path, result)
@@ -274,6 +308,7 @@ def save_time_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_result_path(
         model_key=model_key,
@@ -285,6 +320,7 @@ def save_time_results(
         judge_repeats=judge_repeats,
         result_group="time",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     payload = {"edit": edit_times}
     _write_json(path, payload)
@@ -302,6 +338,7 @@ def save_memory_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_result_path(
         model_key=model_key,
@@ -313,6 +350,7 @@ def save_memory_results(
         judge_repeats=judge_repeats,
         result_group="mem",
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     _write_json(path, memory)
 
@@ -329,6 +367,7 @@ def save_hardware_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path:
     path = build_hardware_path(
         model_key=model_key,
@@ -339,6 +378,7 @@ def save_hardware_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     hardware = dict(hardware)
     for key in (
@@ -365,6 +405,7 @@ def load_hardware_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> dict[str, Any] | None:
     path = build_hardware_path(
         model_key=model_key,
@@ -375,6 +416,7 @@ def load_hardware_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     if not path.exists():
         return None
@@ -382,8 +424,11 @@ def load_hardware_results(
         return json.load(file)
 
 
-def iter_result_files(evaluation_dir: Path | str | None = None) -> list[Path]:
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+def iter_result_files(
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
+) -> list[Path]:
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     if not root.exists():
         return []
     return sorted(path for path in root.rglob("*.json") if path.is_file())
@@ -392,8 +437,10 @@ def iter_result_files(evaluation_dir: Path | str | None = None) -> list[Path]:
 def load_result_file(
     path: Path,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> tuple[dict[str, Any], list[dict[str, Any]] | dict[str, Any]] | None:
-    root = Path(evaluation_dir) if evaluation_dir else EVALUATION_DIR
+    eval_type = normalize_eval_type(eval_type)
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     root = root.resolve()
     path = path.resolve()
 
@@ -454,6 +501,7 @@ def load_result_file(
         payload = json.load(file)
 
     meta = {
+        "eval_type": eval_type,
         "model_key": model_key,
         "method": editing_method,
         "milestones": milestones,

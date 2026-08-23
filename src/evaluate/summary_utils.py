@@ -260,6 +260,7 @@ def _load_run_summary(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> dict[str, Any] | None:
     method_dir = build_method_dir(
         model_key=model_key,
@@ -268,6 +269,7 @@ def _load_run_summary(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
     es_loc_records = _load_json_if_exists(method_dir / "perf" / f"es_loc.{run_index}.json")
@@ -389,6 +391,7 @@ def _load_results_with_skips(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     milestones = _normalize_milestones(milestones)
     runs = _runs_from_count(n_runs)
@@ -407,6 +410,7 @@ def _load_results_with_skips(
                 n_runs=n_runs,
                 judge_repeats=judge_repeats,
                 evaluation_dir=evaluation_dir,
+                eval_type=eval_type,
             )
             if summary is None:
                 missing_runs.append(run_index)
@@ -428,6 +432,7 @@ def load_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> dict[str, dict[str, Any]]:
     data, _ = _load_results_with_skips(
         model_key=model_key,
@@ -436,6 +441,7 @@ def load_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     return data
 
@@ -447,6 +453,7 @@ def _has_complete_method_data(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> bool:
     return all(
         _load_run_summary(
@@ -457,6 +464,7 @@ def _has_complete_method_data(
             n_runs=n_runs,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
+            eval_type=eval_type,
         ) is not None
         for run_index in _runs_from_count(n_runs)
     )
@@ -469,6 +477,7 @@ def _performance_methods_with_base(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[str]:
     if "base" in methods:
         return methods
@@ -479,6 +488,7 @@ def _performance_methods_with_base(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     ):
         return ["base", *methods]
     return methods

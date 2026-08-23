@@ -1,0 +1,48 @@
+# Full sequential output evaluation.
+
+model_key: qwen2.5-7b
+# model_key: llama3.1-8b
+# model_key: qwen3.5-9b
+
+editing_methods:
+  - ft
+  - rome
+  - grace
+  - r_rome
+  - wise
+  - alpha_edit
+  - mnemo
+
+result_names:
+  - es_loc
+  - port
+
+eval_milestones:
+  - 10
+  - 100
+  - 1000
+  - 2000
+  - 5000
+
+n_runs: 3
+run_start: 1
+run_count: null
+
+generation:
+  batch_size: 256
+
+  async_generation:
+    enabled: auto
+    devices: auto
+
+  model_config:
+    max_new_tokens: 50
+    do_sample: false
+    stop_strings:
+      - "\n"
+      - "\\n"
+    strip_leading_newlines: true
+    truncate_at_stop_strings: true
+
+  # show_pbar: true
+  # keep_pbar: false

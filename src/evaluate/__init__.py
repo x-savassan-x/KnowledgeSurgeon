@@ -6,7 +6,13 @@ from .schema import (
     EvalResult,
     MetricResult,
 )
+from .configuration import (
+    load_experiment_configuration,
+    load_judge_configuration,
+    load_selected_evaluation_configuration,
+)
 from .io import (
+    EVAL_TYPES,
     EVALUATION_DIR,
     build_experiment_dir,
     build_hardware_path,
@@ -23,6 +29,15 @@ from .io import (
     save_scored_results,
     save_time_results,
     save_unscored_results,
+    normalize_eval_type,
+    resolve_evaluation_root,
+)
+from .sensitivity import (
+    fingerprint_records,
+    order_cohort,
+    record_identity,
+    select_fixed_cohort,
+    sensitivity_run_indices,
 )
 
 
@@ -62,6 +77,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "AsyncGenerationManager",
+    "EVAL_TYPES",
     "EVALUATION_DIR",
     "EvalRecord",
     "EvalResult",
@@ -83,9 +99,13 @@ __all__ = [
     "get_model_predictions",
     "iter_result_files",
     "load_hardware_results",
+    "load_experiment_configuration",
+    "load_judge_configuration",
     "load_result_file",
+    "load_selected_evaluation_configuration",
     "materialize_base_perf_results",
     "model_device_indices",
+    "normalize_eval_type",
     "rebuild_perf_for_scored_paths",
     "rebuild_perf_from_scored",
     "rebuild_perf_results",
@@ -96,6 +116,12 @@ __all__ = [
     "save_scored_results",
     "save_time_results",
     "save_unscored_results",
+    "resolve_evaluation_root",
+    "fingerprint_records",
+    "order_cohort",
+    "record_identity",
+    "select_fixed_cohort",
+    "sensitivity_run_indices",
     "score_eval_results",
     "score_pending_unscored",
     "score_serialized_eval_result",

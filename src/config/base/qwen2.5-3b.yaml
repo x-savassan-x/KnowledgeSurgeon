@@ -1,0 +1,6 @@
+model_name: Qwen/Qwen2.5-3B
+gpu_id: 0
+fp16: true
+model_parallel: false
+warmup: false
+layer_stats_max_length: 4096

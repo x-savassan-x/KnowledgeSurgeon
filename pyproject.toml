@@ -17,8 +17,8 @@ dependencies = [
     "FlagEmbedding",
 
     # Qwen3.5 accelerated kernels
-    "flash-linear-attention; sys_platform == 'linux'",
-    "causal-conv1d; sys_platform == 'linux'",
+    # "flash-linear-attention; sys_platform == 'linux'",
+    # "causal-conv1d; sys_platform == 'linux'",
 
     # Evaluation and visualization
     "openai",

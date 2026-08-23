@@ -40,6 +40,7 @@ def table_perf_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     perf_methods = _performance_methods_with_base(
@@ -49,6 +50,7 @@ def table_perf_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     data, skipped = _load_results_with_skips(
         model_key=model_key,
@@ -57,6 +59,7 @@ def table_perf_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     _print_skipped(skipped)
     if not data:
@@ -88,6 +91,42 @@ def table_perf_results(
     return _centered_style(df)
 
 
+def table_sensitivity_orders(
+    model_key: str,
+    milestones: list[int],
+    methods: list[str],
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "sensitivity",
+) -> pd.DataFrame:
+    """Show each deterministic sensitivity order before aggregating runs."""
+    milestones = _normalize_milestones(milestones)
+    data, skipped = _load_results_with_skips(
+        model_key, milestones, methods, n_runs, judge_repeats,
+        evaluation_dir, eval_type,
+    )
+    _print_skipped(skipped)
+    rows: list[dict[str, Any]] = []
+    for method_name in _ordered_method_names(data, methods):
+        for order_index, run in enumerate(data[method_name]["runs"], start=1):
+            step = len(milestones) - 1
+            rows.append({
+                "method": method_name,
+                "order": order_index,
+                "ES": run["success"][step],
+                "Loc": run["locality"][step],
+                "Port": run["portability"][step],
+                "time (s)": run["avg_time"][step],
+            })
+    if not rows:
+        print("No sensitivity result files found for the selected settings.")
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    print(f"sensitivity orders | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    return _centered_style(df, hide_index=True)
+
+
 def table_time_results(
     model_key: str,
     milestones: list[int],
@@ -96,10 +135,11 @@ def table_time_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -128,10 +168,11 @@ def table_composite_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -161,10 +202,11 @@ def table_memory_results(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = True,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     methods = _edit_methods_only(methods)
-    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir)
+    data, skipped = _load_results_with_skips(model_key, milestones, methods, n_runs, judge_repeats, evaluation_dir, eval_type)
     _print_skipped(skipped)
     if not data:
         print("No result files found for the selected settings.")
@@ -306,6 +348,7 @@ def table_hardware_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     rows: list[dict[str, Any]] = []
@@ -321,6 +364,7 @@ def table_hardware_results(
                     n_runs=n_runs,
                     judge_repeats=judge_repeats,
                     evaluation_dir=evaluation_dir,
+                    eval_type=eval_type,
                 )
                 if payload is None:
                     continue
@@ -359,6 +403,7 @@ def audit_result_grid(
     result_groups: list[str] | None = None,
     evaluation_dir: Path | str | None = None,
     only_problems: bool = False,
+    eval_type: str = "output",
 ) -> pd.DataFrame:
     milestones = _normalize_milestones(milestones)
     result_names = result_names or ["es_loc", "port"]
@@ -385,6 +430,7 @@ def audit_result_grid(
                                 judge_repeats=judge_repeats,
                                 result_group=result_group,
                                 evaluation_dir=evaluation_dir,
+                                eval_type=eval_type,
                             )
                             for step in milestones
                         )
@@ -400,6 +446,7 @@ def audit_result_grid(
                                 judge_repeats=judge_repeats,
                                 result_group=result_group,
                                 evaluation_dir=evaluation_dir,
+                                eval_type=eval_type,
                             )
                         )
 

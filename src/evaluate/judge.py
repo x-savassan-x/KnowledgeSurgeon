@@ -8,10 +8,10 @@ from statistics import mean
 from typing import Any, Iterable
 
 from .io import (
-    EVALUATION_DIR,
     build_result_path,
     format_log_path,
     load_result_file,
+    resolve_evaluation_root,
     save_benchmark_results,
     save_scored_results,
 )
@@ -227,8 +227,9 @@ async def score_unscored_file(
     judge_config: dict[str, Any],
     evaluation_dir: Path | str | None = None,
     overwrite: bool = False,
+    eval_type: str = "output",
 ) -> Path:
-    parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+    parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
     if parsed is None:
         raise ValueError(f"Invalid result file path: {path}")
 
@@ -260,6 +261,7 @@ async def score_unscored_file(
         n_runs=meta["n_runs"],
         judge_repeats=meta["judge_repeats"],
         evaluation_dir=evaluation_dir,
+        eval_type=meta["eval_type"],
     )
 
 
@@ -272,12 +274,13 @@ def rebuild_perf_results(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> Path | None:
     milestones = normalize_milestones(milestones)
     scored_records: list[dict[str, Any]] = []
-    root = Path(evaluation_dir) if evaluation_dir is not None else EVALUATION_DIR
+    root = resolve_evaluation_root(evaluation_dir, eval_type)
     for path in root.rglob("scored/*.json"):
-        parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+        parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
         if parsed is None:
             continue
         meta, payload = parsed
@@ -291,6 +294,7 @@ def rebuild_perf_results(
             result_names={result_name},
             run_indices={run_index},
             result_group="scored",
+            eval_type=eval_type,
         ):
             continue
         if meta.get("step") not in milestones or not isinstance(payload, dict):
@@ -311,16 +315,18 @@ def rebuild_perf_results(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
 
 def rebuild_perf_for_scored_paths(
     scored_paths: Iterable[Path],
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
 ) -> list[Path]:
-    groups: set[tuple[str, str, tuple[int, ...], str, int, int, int]] = set()
+    groups: set[tuple[str, str, tuple[int, ...], str, int, int, int, str]] = set()
     for path in scored_paths:
-        parsed = load_result_file(path, evaluation_dir=evaluation_dir)
+        parsed = load_result_file(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
         if parsed is None:
             continue
         meta, _ = parsed
@@ -334,10 +340,11 @@ def rebuild_perf_for_scored_paths(
             meta["run_index"],
             meta["n_runs"],
             meta["judge_repeats"],
+            meta["eval_type"],
         ))
 
     perf_paths: list[Path] = []
-    for model_key, method, milestones, result_name, run_index, n_runs, judge_repeats in sorted(groups):
+    for model_key, method, milestones, result_name, run_index, n_runs, judge_repeats, group_eval_type in sorted(groups):
         path = rebuild_perf_results(
             model_key=model_key,
             editing_method=method,
@@ -347,6 +354,7 @@ def rebuild_perf_for_scored_paths(
             n_runs=n_runs,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
+            eval_type=group_eval_type,
         )
         if path is not None:
             perf_paths.append(path)
@@ -362,6 +370,7 @@ def materialize_base_perf_results(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
     log_path: Path | str | None = None,
     verbose: bool = False,
     overwrite: bool = False,
@@ -372,6 +381,7 @@ def materialize_base_perf_results(
         model_key=model_key,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
     if not names:
@@ -392,6 +402,7 @@ def materialize_base_perf_results(
             result_name=result_name,
             judge_repeats=judge_repeats,
             evaluation_dir=evaluation_dir,
+            eval_type=eval_type,
         )
         if not scored_path.exists():
             log_status(
@@ -457,6 +468,7 @@ def materialize_base_perf_results(
                 judge_repeats=judge_repeats,
                 result_group="perf",
                 evaluation_dir=evaluation_dir,
+                eval_type=eval_type,
             )
             if perf_path.exists() and not overwrite:
                 perf_paths.append(perf_path)
@@ -500,6 +512,7 @@ def materialize_base_perf_results(
                 n_runs=n_runs,
                 judge_repeats=judge_repeats,
                 evaluation_dir=evaluation_dir,
+                eval_type=eval_type,
             )
             perf_paths.append(perf_path)
             log_status(
@@ -524,6 +537,7 @@ def rebuild_perf_from_scored(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
     log_path: Path | str | None = None,
     verbose: bool = False,
 ) -> list[Path]:
@@ -536,6 +550,7 @@ def rebuild_perf_from_scored(
         result_names=result_names,
         run_indices=run_indices,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     if not scored_paths:
         log_status(
@@ -550,7 +565,11 @@ def rebuild_perf_from_scored(
         )
         return []
 
-    perf_paths = rebuild_perf_for_scored_paths(scored_paths, evaluation_dir=evaluation_dir)
+    perf_paths = rebuild_perf_for_scored_paths(
+        scored_paths,
+        evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
+    )
     log_status(
         "[perf-rebuilt] "
         f"scored_files={len(scored_paths)} "
@@ -577,6 +596,7 @@ async def score_pending_unscored(
     result_names: Iterable[str] | None = None,
     run_indices: Iterable[int] | None = None,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "output",
     file_concurrency: int = 1,
     overwrite: bool = False,
     watch: bool = False,
@@ -608,6 +628,7 @@ async def score_pending_unscored(
         result_names=result_names,
         run_indices=run_indices,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
 
     log_status(
@@ -635,12 +656,17 @@ async def score_pending_unscored(
             result_names=result_names,
             run_indices=run_indices,
             evaluation_dir=evaluation_dir,
+            eval_type=eval_type,
         )
         pending_paths: list[Path] = []
         for path in unscored_paths:
             if path.resolve() in active_paths:
                 continue
-            scored_path = existing_scored_path_for_unscored(path, evaluation_dir=evaluation_dir)
+            scored_path = existing_scored_path_for_unscored(
+                path,
+                evaluation_dir=evaluation_dir,
+                eval_type=eval_type,
+            )
             if scored_path is None:
                 continue
             if overwrite or not scored_path.exists():
@@ -648,7 +674,7 @@ async def score_pending_unscored(
         return pending_paths
 
     async def _score_path(path: Path) -> Path:
-        label = format_file_label(path, evaluation_dir=evaluation_dir)
+        label = format_file_label(path, evaluation_dir=evaluation_dir, eval_type=eval_type)
         log_status(
             f"[score-start] {label} path={format_log_path(path)}",
             log_path,
@@ -659,6 +685,7 @@ async def score_pending_unscored(
             judge_config=judge_config,
             evaluation_dir=evaluation_dir,
             overwrite=overwrite,
+            eval_type=eval_type,
         )
         log_status(
             f"[score-done] {label} scored={format_log_path(scored_path)}",

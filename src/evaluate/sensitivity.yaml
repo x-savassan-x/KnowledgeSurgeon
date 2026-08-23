@@ -1,0 +1,39 @@
+# Mnemo sensitivity to edit order and Qwen2.5 model size.
+
+model_key: qwen2.5-7b
+# model_key: qwen2.5-3b
+# model_key: qwen2.5-1.5b
+
+editing_methods:
+  - mnemo
+
+result_names:
+  - es_loc
+  - port
+
+eval_milestones:
+  - 1000
+
+# Each run is a deterministic order of the same fixed cohort.
+n_runs: 3
+run_start: 1
+run_count: null
+
+generation:
+  batch_size: 256
+
+  async_generation:
+    enabled: auto
+    devices: auto
+
+  model_config:
+    max_new_tokens: 50
+    do_sample: false
+    stop_strings:
+      - "\n"
+      - "\\n"
+    strip_leading_newlines: true
+    truncate_at_stop_strings: true
+
+  # show_pbar: true
+  # keep_pbar: false
