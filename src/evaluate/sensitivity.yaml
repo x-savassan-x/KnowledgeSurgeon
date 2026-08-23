@@ -12,7 +12,6 @@ result_names:
 eval_milestones:
   - 1000
 
-# Each run is a deterministic order of the same fixed cohort.
 n_runs: 3
 run_start: 1
 run_count: null

@@ -17,6 +17,7 @@ from .summary_utils import (
     _quality_series,
     _runs_from_count,
     _std_series_for_metric,
+    load_sensitivity_runs,
 )
 
 
@@ -124,6 +125,133 @@ def table_sensitivity_orders(
         return pd.DataFrame()
     df = pd.DataFrame(rows)
     print(f"sensitivity orders | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
+    return _centered_style(df, hide_index=True)
+
+
+def table_sensitivity_runs(
+    model_keys: list[str],
+    milestone: int,
+    method: str,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    show_std: bool = False,
+) -> pd.DataFrame:
+    """Render matched sensitivity orders without collapsing them into repetitions."""
+    rows = load_sensitivity_runs(
+        model_keys=model_keys,
+        milestone=milestone,
+        method=method,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    if not rows:
+        print("No sensitivity result files found for the selected settings.")
+        return pd.DataFrame()
+    columns = [
+        "model", "order", "ES", "Loc", "Port",
+        "ES/Loc avg edit time (s)", "Port avg edit time (s)",
+    ]
+    df = pd.DataFrame(rows)[columns]
+    for column in columns[2:]:
+        if column == "order":
+            continue
+        df[column] = df[column].map(lambda value: "-" if value is None else f"{float(value):.2f}")
+    print(f"sensitivity runs | models={model_keys} | milestone={milestone} | method={method} | r{n_runs}-j{judge_repeats}")
+    return _centered_style(df, hide_index=True)
+
+
+def table_sensitivity_variation(
+    model_keys: list[str],
+    milestone: int,
+    method: str,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    show_std: bool = True,
+) -> pd.DataFrame:
+    """Summarize mean, standard deviation, and range across deterministic orders."""
+    rows = load_sensitivity_runs(
+        model_keys=model_keys,
+        milestone=milestone,
+        method=method,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    if not rows:
+        print("No sensitivity result files found for the selected settings.")
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    metric_columns = [
+        "ES", "Loc", "Port",
+        "ES/Loc avg edit time (s)", "Port avg edit time (s)",
+    ]
+    summary_rows: list[dict[str, Any]] = []
+    for model, group in frame.groupby("model", sort=False):
+        row: dict[str, Any] = {"model": model, "orders": len(group)}
+        for column in metric_columns:
+            values = pd.to_numeric(group[column], errors="coerce").dropna()
+            row[f"{column} mean"] = values.mean() if len(values) else None
+            row[f"{column} std"] = values.std(ddof=1) if len(values) > 1 else 0.0 if len(values) else None
+            row[f"{column} range"] = values.max() - values.min() if len(values) else None
+        summary_rows.append(row)
+    df = pd.DataFrame(summary_rows)
+    display_columns = ["model", "orders"]
+    for column in metric_columns:
+        display_columns.append(f"{column} mean")
+        if show_std:
+            display_columns.append(f"{column} std")
+        display_columns.append(f"{column} range")
+    df = df[display_columns]
+    for column in display_columns[2:]:
+        df[column] = df[column].map(lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.2f}")
+    print(f"sensitivity variation | models={model_keys} | milestone={milestone} | method={method} | r{n_runs}-j{judge_repeats}")
+    return _centered_style(df, hide_index=True)
+
+
+def table_sensitivity_audit(
+    model_keys: list[str],
+    milestone: int,
+    method: str,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+) -> pd.DataFrame:
+    """Check completeness, score recomputation, edit counts, and shared orders."""
+    rows = load_sensitivity_runs(
+        model_keys=model_keys,
+        milestone=milestone,
+        method=method,
+        n_runs=n_runs,
+        judge_repeats=judge_repeats,
+        evaluation_dir=evaluation_dir,
+    )
+    if not rows:
+        print("No sensitivity result files found for the selected settings.")
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    expected_es_order = frame.groupby("order")["ES/Loc order hash"].first().to_dict()
+    expected_port_order = frame.groupby("order")["Port order hash"].first().to_dict()
+    expected_es_cohort = frame["ES/Loc cohort hash"].dropna().iloc[0] if frame["ES/Loc cohort hash"].notna().any() else None
+    expected_port_cohort = frame["Port cohort hash"].dropna().iloc[0] if frame["Port cohort hash"].notna().any() else None
+    frame["complete"] = (
+        (frame["ES/Loc edits"] == milestone)
+        & (frame["Port edits"] == milestone)
+        & (frame["ES details"] == milestone * 4)
+        & (frame["Loc details"] == milestone * 4)
+        & (frame["Port details"] == milestone * 3)
+        & frame["aggregate valid"]
+        & frame["time valid"]
+        & frame["artifact files"]
+        & frame.apply(lambda row: row["ES/Loc order hash"] == expected_es_order.get(row["order"]), axis=1)
+        & frame.apply(lambda row: row["Port order hash"] == expected_port_order.get(row["order"]), axis=1)
+        & frame["ES/Loc cohort hash"].eq(expected_es_cohort)
+        & frame["Port cohort hash"].eq(expected_port_cohort)
+    )
+    df = frame[["model", "order", "ES/Loc edits", "Port edits", "ES details", "Loc details", "Port details", "aggregate valid", "time valid", "artifact files", "complete"]]
+    print(f"sensitivity audit | models={model_keys} | milestone={milestone} | method={method} | complete={int(df['complete'].sum())}/{len(df)}")
     return _centered_style(df, hide_index=True)
 
 

@@ -1,4 +1,5 @@
 import json
+import hashlib
 from math import sqrt
 from pathlib import Path
 from statistics import mean, stdev
@@ -423,6 +424,158 @@ def _load_results_with_skips(
         data[method_name] = _aggregate_runs(run_summaries, milestones)
 
     return data, skipped
+
+
+def _sensitivity_json(path: Path) -> Any | None:
+    """Load a sensitivity artifact without turning malformed JSON into a crash."""
+    try:
+        return _load_json_if_exists(path)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+
+
+def _sensitivity_edit_fingerprint(edits: Any, *, ordered: bool) -> str | None:
+    if not isinstance(edits, list):
+        return None
+    identities = []
+    for edit in edits:
+        if not isinstance(edit, dict):
+            return None
+        identities.append({
+            "subject": edit.get("subject"),
+            "prompt": edit.get("prompt"),
+            "answer": edit.get("answer"),
+        })
+    if not ordered:
+        identities = sorted(identities, key=lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True))
+    encoded = json.dumps(identities, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sensitivity_score(record: Any, metric_name: str) -> tuple[float | None, int, bool]:
+    if not isinstance(record, dict):
+        return None, 0, False
+    result = record.get("result", {})
+    metric = result.get(metric_name) if isinstance(result, dict) else None
+    if not isinstance(metric, dict):
+        return None, 0, False
+    details = metric.get("details", [])
+    scores = [item.get("score") for item in details if isinstance(item, dict) and isinstance(item.get("score"), (int, float))]
+    aggregate = metric.get("score")
+    recomputed = (sum(scores) / len(scores)) if scores else None
+    matches = aggregate is not None and recomputed is not None and abs(float(aggregate) - recomputed) <= 1e-9
+    return (float(aggregate) if aggregate is not None else None), len(details), matches
+
+
+def load_sensitivity_runs(
+    model_keys: list[str],
+    milestone: int,
+    method: str,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "sensitivity",
+) -> list[dict[str, Any]]:
+    """Load sensitivity runs while preserving model, cohort, and order identity."""
+    rows: list[dict[str, Any]] = []
+    milestones = [int(milestone)]
+    for model_key in model_keys:
+        method_dir = build_method_dir(model_key, method, milestones, n_runs, judge_repeats, evaluation_dir, eval_type)
+        for run_index in _runs_from_count(n_runs):
+            perf_payloads = {
+                name: _sensitivity_json(method_dir / "perf" / f"{name}.{run_index}.json")
+                for name in ("es_loc", "port")
+            }
+            time_payloads = {
+                name: _sensitivity_json(method_dir / "time" / f"{name}.{run_index}.json")
+                for name in ("es_loc", "port")
+            }
+            es_loc = perf_payloads["es_loc"][0] if isinstance(perf_payloads["es_loc"], list) and perf_payloads["es_loc"] else None
+            port = perf_payloads["port"][0] if isinstance(perf_payloads["port"], list) and perf_payloads["port"] else None
+            artifact_files = all(
+                (method_dir / group / filename).is_file()
+                for group, filename in (
+                    ("perf", f"es_loc.{run_index}.json"),
+                    ("perf", f"port.{run_index}.json"),
+                    ("time", f"es_loc.{run_index}.json"),
+                    ("time", f"port.{run_index}.json"),
+                    ("mem", f"es_loc.{run_index}.json"),
+                    ("mem", f"port.{run_index}.json"),
+                    ("scored", f"es_loc.{run_index}.{milestone}.json"),
+                    ("scored", f"port.{run_index}.{milestone}.json"),
+                    ("unscored", f"es_loc.{run_index}.{milestone}.json"),
+                    ("unscored", f"port.{run_index}.{milestone}.json"),
+                )
+            )
+            es, es_details, es_match = _sensitivity_score(es_loc, "success")
+            loc, loc_details, loc_match = _sensitivity_score(es_loc, "locality")
+            portability, port_details, port_match = _sensitivity_score(port, "portability")
+
+            def average_time(payload: Any) -> float | None:
+                values = payload.get("edit", []) if isinstance(payload, dict) else payload
+                if not isinstance(values, list) or len(values) < milestone:
+                    return None
+                try:
+                    return float(sum(float(value) for value in values[:milestone]) / milestone)
+                except (TypeError, ValueError):
+                    return None
+
+            def valid_time(payload: Any) -> bool:
+                values = payload.get("edit", []) if isinstance(payload, dict) else payload
+                if not isinstance(values, list) or len(values) < milestone:
+                    return False
+                try:
+                    return all(float(value) >= 0 for value in values[:milestone])
+                except (TypeError, ValueError):
+                    return False
+
+            es_loc_edits = es_loc.get("edits") if isinstance(es_loc, dict) else None
+            port_edits = port.get("edits") if isinstance(port, dict) else None
+            rows.append({
+                "model": model_key,
+                "method": method,
+                "order": run_index,
+                "ES": es,
+                "Loc": loc,
+                "Port": portability,
+                "ES/Loc avg edit time (s)": average_time(time_payloads["es_loc"]),
+                "Port avg edit time (s)": average_time(time_payloads["port"]),
+                "time valid": valid_time(time_payloads["es_loc"]) and valid_time(time_payloads["port"]),
+                "artifact files": artifact_files,
+                "ES details": es_details,
+                "Loc details": loc_details,
+                "Port details": port_details,
+                "aggregate valid": es_match and loc_match and port_match,
+                "ES/Loc order hash": _sensitivity_edit_fingerprint(es_loc_edits, ordered=True),
+                "Port order hash": _sensitivity_edit_fingerprint(port_edits, ordered=True),
+                "ES/Loc cohort hash": _sensitivity_edit_fingerprint(es_loc_edits, ordered=False),
+                "Port cohort hash": _sensitivity_edit_fingerprint(port_edits, ordered=False),
+                "ES/Loc edits": len(es_loc_edits) if isinstance(es_loc_edits, list) else 0,
+                "Port edits": len(port_edits) if isinstance(port_edits, list) else 0,
+            })
+    return rows
+
+
+def discover_sensitivity_models(
+    milestone: int,
+    n_runs: int,
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "sensitivity",
+    method: str = "mnemo",
+) -> list[str]:
+    root = Path(evaluation_dir) if evaluation_dir is not None else Path(__file__).resolve().parents[2] / "data" / "evaluation"
+    sensitivity_root = root / eval_type
+    if not sensitivity_root.exists():
+        return []
+    models = []
+    for candidate in sorted(sensitivity_root.iterdir()):
+        if not candidate.is_dir():
+            continue
+        method_dir = build_method_dir(candidate.name, method, [milestone], n_runs, judge_repeats, root, eval_type)
+        if (method_dir / "perf" / "es_loc.1.json").exists():
+            models.append(candidate.name)
+    return models
 
 
 def load_results(
