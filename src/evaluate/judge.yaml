@@ -1,4 +1,3 @@
-# Selects the evaluation namespace processed by judge.ipynb and summary.ipynb.
 eval_type: output
 # eval_type: sensitivity
 # eval_type: intrinsic

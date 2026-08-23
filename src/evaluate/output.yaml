@@ -1,5 +1,3 @@
-# Full sequential output evaluation.
-
 model_key: qwen2.5-7b
 # model_key: llama3.1-8b
 # model_key: qwen3.5-9b

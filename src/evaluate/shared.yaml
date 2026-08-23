@@ -1,4 +1,2 @@
-# Settings shared by all evaluation experiments.
-
 dataset_repo: Savassan/KnowledgeSurgeon
 base_seed: 0

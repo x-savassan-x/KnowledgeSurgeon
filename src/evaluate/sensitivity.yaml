@@ -1,5 +1,3 @@
-# Mnemo sensitivity to edit order and Qwen2.5 model size.
-
 model_key: qwen2.5-7b
 # model_key: qwen2.5-3b
 # model_key: qwen2.5-1.5b
