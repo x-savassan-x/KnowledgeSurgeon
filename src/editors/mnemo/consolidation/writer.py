@@ -12,7 +12,6 @@ from .alpha_edit import (
     release_AlphaEdit_projector,
     upd_matrix_match_shape,
 )
-from ....utils import nethook
 from ....utils.devices import copy_to_param
 from ...editor_utils import EditRequest
 

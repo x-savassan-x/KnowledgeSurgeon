@@ -15,7 +15,6 @@ n_runs: 3
 run_start: 1
 run_count: null
 
-# These overrides apply to every intrinsic condition.
 shared:
   overrides:
     external_only: false
