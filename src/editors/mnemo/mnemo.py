@@ -126,23 +126,18 @@ class Mnemo(Editor):
         max_norm = self.config.delta_config.max_norm
         self.last_delta_saturated = self.last_delta_norm >= max_norm * (1.0 - 1.0e-4)
         if self.config.diagnostics_config.delta_enabled:
-            print(
-                "[mnemo-edit] "
-                + json.dumps(
-                    {
-                        "memory_index": memory_index,
-                        "prompt": request.prompt,
-                        "answer": request.answer,
-                        "final_loss": self.last_delta_loss,
-                        "delta_norm": self.last_delta_norm,
-                        "max_norm": max_norm,
-                        "max_norm_reached": self.last_delta_saturated,
-                    },
-                    ensure_ascii=True,
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
+            payload = {
+                "event": "edit",
+                "memory_index": memory_index,
+                "prompt": request.prompt,
+                "answer": request.answer,
+                "final_loss": self.last_delta_loss,
+                "delta_norm": self.last_delta_norm,
+                "max_norm": max_norm,
+                "max_norm_reached": self.last_delta_saturated,
+            }
+            self._pending_log_events.append(payload)
+            print("[mnemo-edit] " + json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
         if (
             not self._external_only
@@ -190,6 +185,8 @@ class Mnemo(Editor):
     def drain_log_events(self) -> list[dict[str, object]]:
         events = self._pending_log_events
         self._pending_log_events = []
+        if self._interceptor is not None:
+            events.extend(self._interceptor.drain_diagnostic_events())
         return events
 
     @property

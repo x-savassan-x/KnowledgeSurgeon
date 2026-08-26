@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import gc
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -298,13 +299,26 @@ def generate_and_save_unscored(
         f"records={generation_records} "
         f"batch_size={batch_size}"
     )
-    generate_predictions(
-        model,
-        tokenizer,
-        step_eval_results,
-        step_records,
-        **generation_step_config,
-    )
+    try:
+        generate_predictions(
+            model,
+            tokenizer,
+            step_eval_results,
+            step_records,
+            **generation_step_config,
+        )
+    finally:
+        drain_diagnostics = getattr(model, "drain_diagnostic_events", None)
+        if callable(drain_diagnostics):
+            for event in drain_diagnostics():
+                log_fn(
+                    "[generation-event] "
+                    f"run={run_index}/{n_runs} "
+                    f"method={editing_method} "
+                    f"result={result_name} "
+                    f"step={step}/{max_step} "
+                    f"payload={json.dumps(event, ensure_ascii=True, sort_keys=True)}"
+                )
     step_result = aggregate_eval_results(step_eval_results)
     unscored_payload = {
         "step": step,

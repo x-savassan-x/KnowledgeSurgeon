@@ -27,6 +27,7 @@ class Interceptor:
         self._armed_hook_calls = 0
         self._applied_rows = torch.empty(0, dtype=torch.bool)
         self._applied_token_indices = torch.empty(0, dtype=torch.long)
+        self._pending_diagnostic_events: list[dict[str, object]] = []
         try:
             self._hook_handle = block.register_forward_hook(self._hook, with_kwargs=True)
         except TypeError:
@@ -47,6 +48,7 @@ class Interceptor:
             dtype=self._values.dtype,
             device="cpu",
         )
+        self._pending_diagnostic_events.clear()
         self.disarm()
 
     def append_value(self, value: torch.Tensor) -> int:
@@ -213,6 +215,14 @@ class Interceptor:
             "token_indices": self._applied_token_indices.tolist(),
         }
 
+    def record_diagnostic_event(self, payload: dict[str, object]) -> None:
+        self._pending_diagnostic_events.append(payload)
+
+    def drain_diagnostic_events(self) -> list[dict[str, object]]:
+        events = self._pending_diagnostic_events
+        self._pending_diagnostic_events = []
+        return events
+
     def _reset_observation(self) -> None:
         self._armed_hook_calls = 0
         self._applied_rows = torch.empty(0, dtype=torch.bool)
@@ -352,6 +362,10 @@ class PrefillRoutingModel:
 
     def __getattr__(self, name: str):
         return getattr(object.__getattribute__(self, "base_model"), name)
+
+    def drain_diagnostic_events(self) -> list[dict[str, object]]:
+        """Return diagnostics emitted by the routing proxy since the last call."""
+        return object.__getattribute__(self, "interceptor").drain_diagnostic_events()
 
     def __call__(self, *args, **kwargs):
         return object.__getattribute__(self, "base_model")(*args, **kwargs)
@@ -630,6 +644,8 @@ class PrefillRoutingModel:
             observation = object.__getattribute__(
                 self, "interceptor"
             ).diagnostic_snapshot()
+        payload = {"event": "hook", **observation}
+        object.__getattribute__(self, "interceptor").record_diagnostic_event(payload)
         print(
             "[mnemo-hook] "
             + json.dumps(observation, ensure_ascii=True, sort_keys=True),
@@ -642,8 +658,10 @@ class PrefillRoutingModel:
             return value
         return "inf" if value > 0 else "-inf"
 
-    @staticmethod
-    def _emit_diagnostic(payload: dict[str, object]) -> None:
+    def _emit_diagnostic(self, payload: dict[str, object]) -> None:
+        object.__getattribute__(self, "interceptor").record_diagnostic_event(
+            {"event": "route", **payload}
+        )
         print(
             "[mnemo-route] "
             + json.dumps(payload, ensure_ascii=True, sort_keys=True),
