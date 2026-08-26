@@ -88,7 +88,7 @@ def _zero_based_upper(
 def _format_mean_std(
     value: float | None,
     std: float | None = None,
-    decimals: int = 4,
+    decimals: int = 2,
     suffix: str = "",
     show_std: bool = True,
 ) -> str:

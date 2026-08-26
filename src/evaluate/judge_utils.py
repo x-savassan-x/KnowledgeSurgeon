@@ -9,6 +9,7 @@ from .io import (
     build_milestone_result_path,
     format_log_path,
     load_result_file,
+    normalize_eval_type,
     resolve_evaluation_root,
 )
 from .schema import EvalRecord
@@ -123,6 +124,57 @@ def normalize_milestones(milestones: Iterable[int]) -> list[int]:
     if not normalized:
         raise ValueError("milestones must not be empty")
     return normalized
+
+
+def resolve_evaluation_selection(
+    experiment_config: dict[str, Any],
+    eval_type: str,
+) -> tuple[list[str], list[int], list[int]]:
+    """Resolve methods, milestones, and run indices for one evaluation type.
+
+    Intrinsic conditions are represented by artifact method slots.  The
+    intervention study therefore expands its strength values into opaque
+    ``mnemo_sXXX`` slots while encoder and safety retain ``mnemo``.
+    """
+    eval_type = normalize_eval_type(eval_type)
+    if eval_type != "intrinsic":
+        methods = list(experiment_config.get("editing_methods", []))
+        milestones = normalize_milestones(experiment_config["eval_milestones"])
+        n_runs = int(experiment_config["n_runs"])
+        run_start = int(experiment_config.get("run_start", 1))
+        raw_count = experiment_config.get("run_count")
+    else:
+        study_name = experiment_config.get("study")
+        studies = experiment_config.get("studies")
+        if not isinstance(study_name, str) or not isinstance(studies, dict):
+            raise ValueError("intrinsic configuration must define study and studies")
+        study = studies.get(study_name)
+        if not isinstance(study, dict):
+            raise ValueError(f"intrinsic study is not defined: {study_name}")
+        milestones = normalize_milestones(study["eval_milestones"])
+        n_runs = int(study.get("n_runs", experiment_config.get("n_runs", 0)))
+        run_start = int(study.get("run_start", experiment_config.get("run_start", 1)))
+        raw_count = study.get("run_count", experiment_config.get("run_count"))
+        runs = study.get("runs", [])
+        if not isinstance(runs, list) or len(runs) != n_runs:
+            raise ValueError(f"intrinsic study {study_name!r} must define {n_runs} runs")
+        if study_name == "intervention":
+            strengths = study.get("strengths", [])
+            if not strengths:
+                raise ValueError("intrinsic intervention study must define strengths")
+            methods = [
+                f"mnemo_s{int(round(float(strength) * 100)):03d}"
+                for strength in strengths
+            ]
+        else:
+            methods = ["mnemo"]
+
+    if n_runs <= 0 or run_start <= 0:
+        raise ValueError("run settings must be positive")
+    run_count = n_runs - run_start + 1 if raw_count is None else int(raw_count)
+    if run_count <= 0 or run_start + run_count - 1 > n_runs:
+        raise ValueError("requested run range is outside n_runs")
+    return methods, milestones, list(range(run_start, run_start + run_count))
 
 
 def as_set(values: Iterable[Any] | None) -> set[Any] | None:

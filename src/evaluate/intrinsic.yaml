@@ -1,0 +1,94 @@
+study: encoder
+# study: intervention
+# study: safety
+
+model_key: qwen2.5-7b
+
+editing_methods:
+  - mnemo
+
+result_names:
+  - es_loc
+  - port
+
+n_runs: 3
+run_start: 1
+run_count: null
+
+# These overrides apply to every intrinsic condition.
+shared:
+  overrides:
+    external_only: false
+    diagnostics:
+      all: true
+
+studies:
+  encoder:
+    eval_milestones:
+      - 1000
+
+    runs:
+      - id: bge
+        overrides:
+          router:
+            backend: bge-base-en-v1.5
+
+      - id: e5
+        overrides:
+          router:
+            backend: e5-base-v2
+
+      - id: minilm
+        overrides:
+          router:
+            backend: all-minilm-l6-v2
+
+  intervention:
+    eval_milestones:
+      - 1000
+
+    strengths:
+      - 0.25
+      - 0.50
+      - 1.00
+
+    runs:
+      - id: n20
+        overrides:
+          delta:
+            max_norm: 20
+
+      - id: n40
+        overrides:
+          delta:
+            max_norm: 40
+
+      - id: n80
+        overrides:
+          delta:
+            max_norm: 80
+
+  safety:
+    eval_milestones:
+      - 2000
+
+    shared:
+      overrides:
+        safety:
+          start_after_edits: 0
+
+    runs:
+      - id: v1
+        overrides:
+          safety:
+            warning_votes_required: 1
+
+      - id: v2
+        overrides:
+          safety:
+            warning_votes_required: 2
+
+      - id: v3
+        overrides:
+          safety:
+            warning_votes_required: 3

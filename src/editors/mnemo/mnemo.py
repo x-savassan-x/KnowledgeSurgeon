@@ -321,6 +321,23 @@ class Mnemo(Editor):
             raise RuntimeError("Mnemo interceptor is not installed.")
         return self._interceptor
 
+    def set_intervention_strength(self, strength: float) -> None:
+        """Update the generation proxy's intervention strength at runtime."""
+        strength = float(strength)
+        if not 0.0 < strength <= 1.0:
+            raise ValueError("Mnemo intervention_strength must be in (0, 1].")
+        runtime = self.model
+        if not isinstance(runtime, PrefillRoutingModel):
+            raise RuntimeError("Mnemo generation runtime is not installed.")
+        runtime.intervention_strength = strength
+
+    @property
+    def intervention_strength(self) -> float:
+        runtime = self.model
+        if not isinstance(runtime, PrefillRoutingModel):
+            return float(self.config.intervention_strength)
+        return float(runtime.intervention_strength)
+
     def _require_writer(self) -> ConsolidationWriter:
         if self.writer is None:
             raise RuntimeError(

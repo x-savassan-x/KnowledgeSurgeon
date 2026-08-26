@@ -15,22 +15,3 @@ eval_milestones:
 n_runs: 3
 run_start: 1
 run_count: null
-
-generation:
-  batch_size: 256
-
-  async_generation:
-    enabled: auto
-    devices: auto
-
-  model_config:
-    max_new_tokens: 50
-    do_sample: false
-    stop_strings:
-      - "\n"
-      - "\\n"
-    strip_leading_newlines: true
-    truncate_at_stop_strings: true
-
-  # show_pbar: true
-  # keep_pbar: false

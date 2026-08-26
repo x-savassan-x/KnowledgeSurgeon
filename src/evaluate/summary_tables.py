@@ -10,6 +10,7 @@ from .summary_utils import (
     _format_mean_std,
     _format_seconds_mean_std,
     _load_results_with_skips,
+    _load_run_summary,
     _normalize_milestones,
     _ordered_method_names,
     _performance_methods_with_base,
@@ -19,6 +20,98 @@ from .summary_utils import (
     _std_series_for_metric,
     load_sensitivity_runs,
 )
+
+
+def _intrinsic_value(summary: dict[str, Any] | None, key: str, index: int = -1) -> float | None:
+    """Return a final intrinsic value while tolerating incomplete artifacts."""
+    if not summary:
+        return None
+    values = summary.get(key)
+    if not isinstance(values, list) or not values:
+        return None
+    value = values[index]
+    return float(value) if value is not None else None
+
+
+def table_intrinsic_results(
+    study: str,
+    intrinsic_config: dict[str, Any],
+    judge_repeats: int,
+    evaluation_dir: Path | str | None = None,
+    eval_type: str = "intrinsic",
+) -> pd.DataFrame:
+    """Render one compact table for the selected intrinsic study.
+
+    Intrinsic run indices identify conditions rather than statistical repeats;
+    consequently this function reports one row per configured condition.
+    """
+    studies = intrinsic_config.get("studies", {})
+    study_config = studies.get(study)
+    if not isinstance(study_config, dict):
+        raise ValueError(f"Unknown intrinsic study: {study}")
+    model_key = str(intrinsic_config["model_key"])
+    n_runs = int(intrinsic_config.get("n_runs", len(study_config.get("runs", []))))
+    milestones = [int(step) for step in study_config.get("eval_milestones", [])]
+    if not milestones:
+        raise ValueError(f"Intrinsic study {study!r} has no eval_milestones")
+    milestone = milestones[-1]
+    run_start = int(intrinsic_config.get("run_start", 1))
+    run_count = intrinsic_config.get("run_count")
+    run_stop = n_runs if run_count is None else min(n_runs, run_start + int(run_count) - 1)
+    run_indices = range(run_start, run_stop + 1)
+
+    rows: list[dict[str, Any]] = []
+    runs = study_config.get("runs", [])
+    for run_index in run_indices:
+        run = runs[run_index - 1] if run_index - 1 < len(runs) else {"id": f"run{run_index}", "overrides": {}}
+        condition_id = str(run.get("id", f"run{run_index}"))
+        overrides = run.get("overrides", {}) if isinstance(run, dict) else {}
+        if study == "intervention":
+            strengths = study_config.get("strengths", study_config.get("intervention_strengths", []))
+            for strength in strengths:
+                strength_value = float(strength)
+                slot = f"mnemo_s{int(round(strength_value * 100)):03d}"
+                summary = _load_run_summary(
+                    model_key, slot, milestones, run_index, n_runs, judge_repeats,
+                    evaluation_dir, eval_type,
+                )
+                rows.append({
+                    "max norm": overrides.get("delta", {}).get("max_norm", condition_id),
+                    "strength": strength_value,
+                    "ES": _intrinsic_value(summary, "success"),
+                    "Loc": _intrinsic_value(summary, "locality"),
+                    "Port": _intrinsic_value(summary, "portability"),
+                    "time (s)": _intrinsic_value(summary, "avg_time"),
+                })
+        else:
+            summary = _load_run_summary(
+                model_key, "mnemo", milestones, run_index, n_runs, judge_repeats,
+                evaluation_dir, eval_type,
+            )
+            label = condition_id
+            if study == "encoder":
+                label = overrides.get("router", {}).get("backend", condition_id)
+                label = str(label)
+            rows.append({
+                "condition": label,
+                "ES": _intrinsic_value(summary, "success"),
+                "Loc": _intrinsic_value(summary, "locality"),
+                "Port": _intrinsic_value(summary, "portability"),
+                "time (s)": _intrinsic_value(summary, "avg_time"),
+            })
+
+    if not rows:
+        print(f"No intrinsic result files found for study={study}.")
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    for column in frame.columns:
+        if column in {"condition", "max norm"}:
+            continue
+        frame[column] = frame[column].map(
+            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.2f}"
+        )
+    print(f"intrinsic {study} | model={model_key} | milestone={milestone} | eval_type={eval_type}")
+    return _centered_style(frame, hide_index=True)
 
 
 def _centered_style(df: pd.DataFrame, hide_index: bool = False) -> Any:
@@ -124,6 +217,10 @@ def table_sensitivity_orders(
         print("No sensitivity result files found for the selected settings.")
         return pd.DataFrame()
     df = pd.DataFrame(rows)
+    for column in ("ES", "Loc", "Port", "time (s)"):
+        df[column] = df[column].map(
+            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.2f}"
+        )
     print(f"sensitivity orders | model={model_key} | milestones={milestones} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df, hide_index=True)
 
@@ -136,6 +233,7 @@ def table_sensitivity_runs(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = False,
+    eval_type: str = "sensitivity",
 ) -> pd.DataFrame:
     """Render matched sensitivity orders without collapsing them into repetitions."""
     rows = load_sensitivity_runs(
@@ -145,6 +243,7 @@ def table_sensitivity_runs(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     if not rows:
         print("No sensitivity result files found for the selected settings.")
@@ -155,8 +254,6 @@ def table_sensitivity_runs(
     ]
     df = pd.DataFrame(rows)[columns]
     for column in columns[2:]:
-        if column == "order":
-            continue
         df[column] = df[column].map(lambda value: "-" if value is None else f"{float(value):.2f}")
     print(f"sensitivity runs | models={model_keys} | milestone={milestone} | method={method} | r{n_runs}-j{judge_repeats}")
     return _centered_style(df, hide_index=True)
@@ -170,6 +267,7 @@ def table_sensitivity_variation(
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
     show_std: bool = True,
+    eval_type: str = "sensitivity",
 ) -> pd.DataFrame:
     """Summarize mean, standard deviation, and range across deterministic orders."""
     rows = load_sensitivity_runs(
@@ -179,6 +277,7 @@ def table_sensitivity_variation(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     if not rows:
         print("No sensitivity result files found for the selected settings.")
@@ -218,6 +317,7 @@ def table_sensitivity_audit(
     n_runs: int,
     judge_repeats: int,
     evaluation_dir: Path | str | None = None,
+    eval_type: str = "sensitivity",
 ) -> pd.DataFrame:
     """Check completeness, score recomputation, edit counts, and shared orders."""
     rows = load_sensitivity_runs(
@@ -227,6 +327,7 @@ def table_sensitivity_audit(
         n_runs=n_runs,
         judge_repeats=judge_repeats,
         evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
     )
     if not rows:
         print("No sensitivity result files found for the selected settings.")

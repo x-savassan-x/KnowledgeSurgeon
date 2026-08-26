@@ -237,7 +237,11 @@ async def score_unscored_file(
     if meta["result_group"] != "unscored":
         raise ValueError(f"Expected an unscored result file, got {meta['result_group']}: {path}")
 
-    scored_path = scored_path_from_meta(meta, evaluation_dir=evaluation_dir)
+    scored_path = scored_path_from_meta(
+        meta,
+        evaluation_dir=evaluation_dir,
+        eval_type=eval_type,
+    )
     if scored_path.exists() and not overwrite:
         return scored_path
 
