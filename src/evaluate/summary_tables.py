@@ -50,13 +50,13 @@ def table_intrinsic_results(
     if not isinstance(study_config, dict):
         raise ValueError(f"Unknown intrinsic study: {study}")
     model_key = str(intrinsic_config["model_key"])
-    n_runs = int(intrinsic_config.get("n_runs", len(study_config.get("runs", []))))
+    n_runs = int(study_config.get("n_runs", intrinsic_config.get("n_runs", len(study_config.get("runs", [])))))
     milestones = [int(step) for step in study_config.get("eval_milestones", [])]
     if not milestones:
         raise ValueError(f"Intrinsic study {study!r} has no eval_milestones")
     milestone = milestones[-1]
-    run_start = int(intrinsic_config.get("run_start", 1))
-    run_count = intrinsic_config.get("run_count")
+    run_start = int(study_config.get("run_start", intrinsic_config.get("run_start", 1)))
+    run_count = study_config.get("run_count", intrinsic_config.get("run_count"))
     run_stop = n_runs if run_count is None else min(n_runs, run_start + int(run_count) - 1)
     run_indices = range(run_start, run_stop + 1)
 
@@ -70,7 +70,7 @@ def table_intrinsic_results(
             strengths = study_config.get("strengths", study_config.get("intervention_strengths", []))
             for strength in strengths:
                 strength_value = float(strength)
-                slot = f"mnemo_s{int(round(strength_value * 100)):03d}"
+                slot = f"mnemo_intervention_s{int(round(strength_value * 100)):03d}"
                 summary = _load_run_summary(
                     model_key, slot, milestones, run_index, n_runs, judge_repeats,
                     evaluation_dir, eval_type,
@@ -84,8 +84,9 @@ def table_intrinsic_results(
                     "time (s)": _intrinsic_value(summary, "avg_time"),
                 })
         else:
+            slot = f"mnemo_{study}"
             summary = _load_run_summary(
-                model_key, "mnemo", milestones, run_index, n_runs, judge_repeats,
+                model_key, slot, milestones, run_index, n_runs, judge_repeats,
                 evaluation_dir, eval_type,
             )
             label = condition_id

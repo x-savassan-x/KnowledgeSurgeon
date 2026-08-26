@@ -133,8 +133,9 @@ def resolve_evaluation_selection(
     """Resolve methods, milestones, and run indices for one evaluation type.
 
     Intrinsic conditions are represented by artifact method slots.  The
-    intervention study therefore expands its strength values into opaque
-    ``mnemo_sXXX`` slots while encoder and safety retain ``mnemo``.
+    intervention study expands its strength values into study-specific
+    ``mnemo_intervention_sXXX`` slots; encoder and safety use their own
+    study-specific slots as well.
     """
     eval_type = normalize_eval_type(eval_type)
     if eval_type != "intrinsic":
@@ -163,11 +164,12 @@ def resolve_evaluation_selection(
             if not strengths:
                 raise ValueError("intrinsic intervention study must define strengths")
             methods = [
-                f"mnemo_s{int(round(float(strength) * 100)):03d}"
+                f"mnemo_intervention_s{int(round(float(strength) * 100)):03d}"
                 for strength in strengths
             ]
         else:
-            methods = ["mnemo"]
+            methods = [f"mnemo_{study_name}"]
+
 
     if n_runs <= 0 or run_start <= 0:
         raise ValueError("run settings must be positive")
